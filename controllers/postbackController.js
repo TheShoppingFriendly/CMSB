@@ -33,7 +33,7 @@ export const handlePostback = async (req, res) => {
 
     const insertSql = `
       INSERT INTO conversions 
-      (clickid, click_row_id, payout, status, postback_payload)
+      (clickid, click_id, payout, status, postback_payload)
       VALUES ($1, $2, $3, $4, $5)
     `;
 
