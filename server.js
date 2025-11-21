@@ -11,7 +11,7 @@ import db from "./db.js";
 
 // Import Routes (ONLY the ones you have)
 import clickTrackingRoutes from "./routes/clickTrackingRoutes.js";
-import conversionRoutes from "./routes/conversionRoutes.js";
+// import conversionRoutes from "./routes/conversionRoutes.js";
 
 const app = express();
 
@@ -28,7 +28,7 @@ app.use(express.json());
 
 // Mount Routes
 app.use("/api", clickTrackingRoutes);
-app.use("/api", conversionRoutes);
+// app.use("/api", conversionRoutes);
 
 // Default Route
 app.get("/", (req, res) => {
