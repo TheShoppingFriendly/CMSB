@@ -1,18 +1,18 @@
 // routes/clickTrackingRoutes.js
 import express from "express";
 import { 
-  generateSubIdAndTrack, 
-  getClickBySubId 
+  generateClickIdAndTrack,
+  getClickByClickId
 } from "../controllers/clickController.js";
 
 const router = express.Router();
 
 console.log("✅ clickTrackingRoutes loaded");
 
-// Generate a sub_id + record a click
-router.post("/generate-subid", generateSubIdAndTrack);
+// Generate a clickid + record a click
+router.post("/generate-clickid", generateClickIdAndTrack);
 
 // Debug route for checking a click record
-router.get("/clicks/:sub_id", getClickBySubId);
+router.get("/clicks/:clickid", getClickByClickId);
 
 export default router;

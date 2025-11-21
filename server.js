@@ -32,7 +32,7 @@ app.use("/api", clickTrackingRoutes);
 
 // Default Route
 app.get("/", (req, res) => {
-  res.send("Tracking API Running...");
+  res.send("Tracking API Running 1...");
 });
 
 // Start Server

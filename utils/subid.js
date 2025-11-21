@@ -1,7 +1,9 @@
-    // utils/subid.js
+// utils/clickid.js
 // Generates: CHECK + YYYYMMDD + 8-digit secure random number
 
-export function generateSubId() {
+import crypto from "crypto";
+
+export function generateClickId() {
   const now = new Date();
 
   const yyyy = now.getFullYear();
@@ -10,12 +12,10 @@ export function generateSubId() {
 
   const datePart = `${yyyy}${mm}${dd}`;
 
-  // Stronger randomness using crypto
-  const array = new Uint32Array(1);
-  crypto.getRandomValues(array);
-
-  // Convert to 8 digits
-  const randomPart = String(array[0] % 100000000).padStart(8, "0");
+  // Secure random 4 bytes -> convert to 8-digit number
+  const randomBytes = crypto.randomBytes(4);
+  const randomNumber = randomBytes.readUInt32BE(0) % 100000000;
+  const randomPart = String(randomNumber).padStart(8, "0");
 
   return `CHECK${datePart}${randomPart}`;
 }
