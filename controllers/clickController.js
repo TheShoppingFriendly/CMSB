@@ -1,9 +1,10 @@
-// controllers/clickController.js
-import db from "../db.js"; 
-import { generateClickId } from "../utils/subid.js";
+import db from "../db.js";
+import { generateClickId } from "../utils/clickid.js";
 
-// Generate clickid + track click
-export const generateSubIdAndTrack = async (req, res) => {
+// ------------------------
+// CREATE CLICK + clickid
+// ------------------------
+export const generateClickIdAndTrack = async (req, res) => {
   try {
     const { wp_user_id, coupon_url, campaign_id } = req.body;
 
@@ -14,19 +15,16 @@ export const generateSubIdAndTrack = async (req, res) => {
     const wpUserId = wp_user_id ? Number(wp_user_id) : null;
     const campaignId = campaign_id ? Number(campaign_id) : null;
 
-    // OLD: sub_id → NEW: clickid
     const clickid = generateClickId();
 
-    // Append clickid to outbound URL
+    // Append clickid to URL
     const separator = coupon_url.includes("?") ? "&" : "?";
     const final_url = `${coupon_url}${separator}clickid=${encodeURIComponent(clickid)}`;
 
-    // Get IP + user-agent
     const ip_address =
       (req.headers["x-forwarded-for"] || "").split(",").shift().trim() ||
       req.socket.remoteAddress ||
       null;
-
     const user_agent = req.headers["user-agent"] || null;
 
     const sql = `
@@ -48,22 +46,24 @@ export const generateSubIdAndTrack = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      clickid,        // renamed
+      clickid,
       final_url,
-      click_row_id: rows[0]?.id || null,
+      click_id: rows[0]?.id || null,
     });
   } catch (err) {
-    console.error("ERROR generateSubIdAndTrack:", err);
+    console.error("ERROR generateClickIdAndTrack:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-// Debug route to fetch click by clickid
-export const getClickByClickid = async (req, res) => {
+// ------------------------
+// GET CLICK BY clickid
+// ------------------------
+export const getClickByClickId = async (req, res) => {
   try {
     const { clickid } = req.params;
     if (!clickid)
-      return res.status(400).json({ success: false, message: "clickid is required" });
+      return res.status(400).json({ success: false, message: "clickid required" });
 
     const { rows } = await db.query(
       "SELECT * FROM click_tracking WHERE clickid = $1 LIMIT 1",
@@ -75,7 +75,7 @@ export const getClickByClickid = async (req, res) => {
 
     return res.json({ success: true, click: rows[0] });
   } catch (err) {
-    console.error("ERROR getClickByClickid:", err);
+    console.error("ERROR getClickByClickId:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
