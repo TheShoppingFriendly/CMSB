@@ -1,9 +1,9 @@
 // controllers/clickController.js
 import db from "../db.js"; 
-import { generateSubId } from "../utils/subid.js";
+import { generateClickId } from "../utils/subid.js";
 
 // Generate clickid + track click
-export const generateSubIdAndTrack = async (req, res) => {
+export const generateClickIdAndTrack = async (req, res) => {
   try {
     const { wp_user_id, coupon_url, campaign_id } = req.body;
 
@@ -15,7 +15,7 @@ export const generateSubIdAndTrack = async (req, res) => {
     const campaignId = campaign_id ? Number(campaign_id) : null;
 
     // OLD: sub_id → NEW: clickid
-    const clickid = generateSubId();
+    const clickid = generateClickId();
 
     // Append clickid to outbound URL
     const separator = coupon_url.includes("?") ? "&" : "?";
@@ -53,7 +53,7 @@ export const generateSubIdAndTrack = async (req, res) => {
       click_row_id: rows[0]?.id || null,
     });
   } catch (err) {
-    console.error("ERROR generateSubIdAndTrack:", err);
+    console.error("ERROR generateClickIdAndTrack:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
