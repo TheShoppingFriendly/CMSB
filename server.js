@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Import DB connection
-import db from "./db.js";
+// import db from "./db.js";
 
 // Import Routes (ONLY the ones you have)
 import clickTrackingRoutes from "./routes/clickTrackingRoutes.js";
@@ -18,7 +18,7 @@ const app = express();
 // CORS setup
 app.use(
   cors({
-    origin: "*",
+    origin: ["https://thegreatbuying.com/"],
     methods: ["GET", "POST"],
     credentials: true,
   })

@@ -17,5 +17,5 @@ export function generateClickId() {
   const randomNumber = randomBytes.readUInt32BE(0) % 100000000;
   const randomPart = String(randomNumber).padStart(8, "0");
 
-  return `CHECK${datePart}${randomPart}`;
+  return `TGB${datePart}${randomPart}`;
 }

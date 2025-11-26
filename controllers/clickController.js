@@ -19,7 +19,7 @@ export const generateClickIdAndTrack = async (req, res) => {
 
     // Append clickid to URL
     const separator = coupon_url.includes("?") ? "&" : "?";
-    const final_url = `${coupon_url}${separator}clickid=${encodeURIComponent(clickid)}`;
+    const final_url = `${coupon_url}${separator}=${encodeURIComponent(clickid)}`;
 
     const ip_address =
       (req.headers["x-forwarded-for"] || "").split(",").shift().trim() ||

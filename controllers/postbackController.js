@@ -24,7 +24,7 @@ export const handlePostback = async (req, res) => {
     );
 
     if (!clickResult.rows.length) {
-      console.warn("Invalid clickid received in postback:", clickid);
+      console.warn("Invalid clickid received in postback:", clickid); 
       return res.status(404).send("Invalid clickid");
     }
 
