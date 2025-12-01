@@ -8,11 +8,7 @@ export const handlePostback = async (req, res) => {
 
     // Accept multiple aliases (networks send different param names)
     const clickid =
-<<<<<<< HEAD
-      data.clickid || data.click_id || data.cid || data.sub_id || data.sid || data.SID || data.subid;
-=======
       data.clickid || data.click_id || data.cid || data.sub_id || data.sid || data.SID || data.subid ;
->>>>>>> 6fa3d1dab40ebd9a43afec99c8ab2aca6731de10
 
     const payout = data.payout || data.amount || 0;
     const status = data.status || "approved"; // default for testing
