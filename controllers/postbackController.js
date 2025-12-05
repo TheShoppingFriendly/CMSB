@@ -3,49 +3,89 @@ import db from "../db.js";
 
 export const handlePostback = async (req, res) => {
   try {
-    // Accept GET or POST for flexibility
     const data = req.method === "GET" ? req.query : req.body;
 
-    // Accept multiple aliases (networks send different param names)
+    // Resolve Click ID (multiple alias support)
     const clickid =
-      data.clickid || data.click_id || data.cid || data.sub_id || data.sid || data.SID || data.subid ;
+      data.clickid ||
+      data.click_id ||
+      data.cid ||
+      data.sub_id ||
+      data.sid ||
+      data.SID ||
+      data.subid;
+
+    // Optional: also accept order ID
+    const orderId =
+      data.order_id ||
+      data.transaction_id ||
+      data.txn_id ||
+      data.orderid ||
+      null;
 
     const payout = data.payout || data.amount || 0;
-    const status = data.status || "approved"; // default for testing
+    const status = data.status || "approved";
 
     if (!clickid) {
       return res.status(400).send("Missing clickid");
     }
 
-    // find click record
+    // Fetch click record
     const clickResult = await db.query(
-      "SELECT id, wp_user_id FROM click_tracking WHERE clickid = $1 LIMIT 1",
+      "SELECT id FROM click_tracking WHERE clickid = $1 LIMIT 1",
       [clickid]
     );
 
     if (!clickResult.rows.length) {
-      console.warn("Invalid clickid received in postback:", clickid); 
+      console.warn("Invalid clickid received:", clickid);
       return res.status(404).send("Invalid clickid");
     }
 
     const click_row_id = clickResult.rows[0].id;
+
+    // ------------------------------------------
+    // #1: De-dup by ORDER ID  
+    // ------------------------------------------
+    if (orderId) {
+      const orderCheck = await db.query(
+        "SELECT id FROM conversions WHERE order_id = $1 LIMIT 1",
+        [orderId]
+      );
+
+      if (orderCheck.rows.length > 0) {
+        console.warn("Duplicate ORDER detected:", orderId);
+        return res.status(200).send("OK (duplicate order ignored)");
+      }
+    }
+
+    // ------------------------------------------
+    // #2: De-dup by CLICK ID
+    // ------------------------------------------
+    const clickCheck = await db.query(
+      "SELECT id FROM conversions WHERE clickid = $1 LIMIT 1",
+      [clickid]
+    );
+
+    if (clickCheck.rows.length > 0) {
+      console.warn("Duplicate CLICKID detected:", clickid);
+      return res.status(200).send("OK (duplicate click ignored)");
+    }
+
+    // ------------------------------------------
+    // Insert conversion
+    // ------------------------------------------
     const payload = JSON.stringify(data);
 
-    const insertSql = `
+    await db.query(
+      `
       INSERT INTO conversions 
-      (clickid, click_id, payout, status, postback_payload)
-      VALUES ($1, $2, $3, $4, $5)
-    `;
+      (clickid, click_id, payout, status, order_id, postback_payload)
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `,
+      [clickid, click_row_id, payout, status, orderId, payload]
+    );
 
-    await db.query(insertSql, [
-      clickid,
-      click_row_id,
-      payout || 0,
-      status,
-      payload,
-    ]);
-
-    return res.send("OK");
+    return res.status(200).send("OK");
   } catch (err) {
     console.error("ERROR handlePostback:", err);
     return res.status(500).send("Server error");
