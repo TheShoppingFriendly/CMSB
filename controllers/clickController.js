@@ -6,7 +6,7 @@ import { generateClickId } from "../utils/clickid.js";
 // ------------------------
 export const generateClickIdAndTrack = async (req, res) => {
   try {
-    const { wp_user_id, coupon_url, campaign_id } = req.body;
+    const { wp_user_id, coupon_url, campaign_id, tracking_type } = req.body;
 
     if (!coupon_url) {
       return res.status(400).json({ success: false, message: "coupon_url is required" });
@@ -14,6 +14,11 @@ export const generateClickIdAndTrack = async (req, res) => {
 
     const wpUserId = wp_user_id ? Number(wp_user_id) : null;
     const campaignId = campaign_id ? Number(campaign_id) : null;
+
+    // tracking_type comes from WordPress ACF
+    // Allowed values: "affiliate" OR "pixel"
+    const safeTrackingType =
+      tracking_type === "pixel" ? "pixel" : "affiliate";
 
     const clickid = generateClickId();
 
@@ -29,8 +34,8 @@ export const generateClickIdAndTrack = async (req, res) => {
 
     const sql = `
       INSERT INTO click_tracking
-        (wp_user_id, campaign_id, clickid, coupon_url, final_redirect_url, ip_address, user_agent)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+        (wp_user_id, campaign_id, clickid, coupon_url, final_redirect_url, ip_address, user_agent, tracking_type)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING id
     `;
 
@@ -42,12 +47,14 @@ export const generateClickIdAndTrack = async (req, res) => {
       final_url,
       ip_address,
       user_agent,
+      safeTrackingType, // NEW
     ]);
 
     return res.status(201).json({
       success: true,
       clickid,
       final_url,
+      tracking_type: safeTrackingType,
       click_id: rows[0]?.id || null,
     });
   } catch (err) {

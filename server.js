@@ -12,6 +12,8 @@ dotenv.config();
 // Import Routes (ONLY the ones you have)
 import clickTrackingRoutes from "./routes/clickTrackingRoutes.js";
 import conversionRoutes from "./routes/conversionRoutes.js";
+import pixelRoutes from "./routes/pixelRoutes.js";
+
 
 const app = express();
 
@@ -29,6 +31,8 @@ app.use(express.json());
 // Mount Routes
 app.use("/api", clickTrackingRoutes);
 app.use("/api", conversionRoutes);
+app.use("/api", pixelRoutes);
+
 
 // Default Route
 app.get("/", (req, res) => {
