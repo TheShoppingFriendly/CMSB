@@ -21,7 +21,7 @@ export const generateClickIdAndTrack = async (req, res) => {
 
         const clickid = generateClickId();
 
-        // 🔥 FIX: Always set final_url to the base coupon_url.
+        // FIX: Always set final_url to the base coupon_url.
         // The WordPress plugin will handle appending the ClickID to the URL
         // for both 'affiliate' (Postback) and 'pixel' (Client-side) tracking
         // using the correct parameter name (p1, sub1, etc.).

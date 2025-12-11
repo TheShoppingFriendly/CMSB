@@ -20,9 +20,16 @@ const app = express();
 // CORS setup
 app.use(
   cors({
-    origin: ["https://thegreatbuying.com/"],
-    methods: ["GET", "POST"],
-    credentials: true,
+    origin: [
+      "https://thegreatbuying.com", // Your WordPress domain (Keep this for the initial AJAX request)
+      "https://checkout.shopify.com", // Mandatory universal checkout domain
+      "https://www.amgadgets.com",    // The custom domain you are testing
+      "https://amgadgets.com",        // The naked domain (good practice)
+      // Add more brand domains here as you expand:
+      // "https://brand-b.com",
+    ],
+    methods: ["GET", "POST"], // Keep these methods
+    credentials: true,       // Keep credentials if you use session cookies/auth
   })
 );
 
