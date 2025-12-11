@@ -16,22 +16,18 @@ export const generateClickIdAndTrack = async (req, res) => {
         const campaignId = campaign_id ? Number(campaign_id) : null;
 
         // tracking_type comes from WordPress ACF
-        // Allowed values: "affiliate" OR "pixel"
         const safeTrackingType =
             tracking_type === "pixel" ? "pixel" : "affiliate";
 
         const clickid = generateClickId();
 
-        // 🎯 CORRECTED LOGIC: Determine final_url based on tracking_type
-        let final_url = coupon_url; // Default to original URL
-
-        if (safeTrackingType === "affiliate") {
-            // For affiliate links, append the clickid to the URL.
-            const separator = coupon_url.includes("?") ? "&" : "?";
-            final_url = `${coupon_url}${separator}clickid=${encodeURIComponent(clickid)}`;
-        } 
-        // For 'pixel' type, final_url remains the original coupon_url, 
-        // as the ClickID is handled by the WordPress front-end JS (cookie/storage).
+        // 🔥 FIX: Always set final_url to the base coupon_url.
+        // The WordPress plugin will handle appending the ClickID to the URL
+        // for both 'affiliate' (Postback) and 'pixel' (Client-side) tracking
+        // using the correct parameter name (p1, sub1, etc.).
+        let final_url = coupon_url;
+        
+        // Removed the old conditional logic that appended clickid only for 'affiliate' type.
 
         const ip_address =
             (req.headers["x-forwarded-for"] || "").split(",").shift().trim() ||
@@ -41,7 +37,7 @@ export const generateClickIdAndTrack = async (req, res) => {
 
         const sql = `
             INSERT INTO click_tracking
-              (wp_user_id, campaign_id, clickid, coupon_url, final_redirect_url, ip_address, user_agent, tracking_type)
+             (wp_user_id, campaign_id, clickid, coupon_url, final_redirect_url, ip_address, user_agent, tracking_type)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id
         `;
@@ -51,7 +47,7 @@ export const generateClickIdAndTrack = async (req, res) => {
             campaignId,
             clickid,
             coupon_url,
-            final_url, // Use the conditionally set final_url
+            final_url, // final_url in DB is the base URL
             ip_address,
             user_agent,
             safeTrackingType,
@@ -60,7 +56,7 @@ export const generateClickIdAndTrack = async (req, res) => {
         return res.status(201).json({
             success: true,
             clickid,
-            final_url, // Return the final URL for the client to redirect to
+            final_url, // Return the base URL for the client (WordPress) to construct the final link
             tracking_type: safeTrackingType,
             click_id: rows[0]?.id || null,
         });
@@ -71,7 +67,7 @@ export const generateClickIdAndTrack = async (req, res) => {
 };
 
 // ------------------------
-// GET CLICK BY clickid
+// GET CLICK BY clickid (No changes needed)
 // ------------------------
 export const getClickByClickId = async (req, res) => {
     try {
