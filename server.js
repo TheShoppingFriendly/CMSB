@@ -20,16 +20,24 @@ const app = express();
 // CORS setup
 app.use(
   cors({
-    origin: [
-      "https://thegreatbuying.com", // Your WordPress domain (Keep this for the initial AJAX request)
-      "https://checkout.shopify.com", // Mandatory universal checkout domain
-      "https://www.amgadgets.com",    // The custom domain you are testing
-      "https://amgadgets.com",        // The naked domain (good practice)
-      // Add more brand domains here as you expand:
-      // "https://brand-b.com",
-    ],
-    methods: ["GET", "POST"], // Keep these methods
-    credentials: true,       // Keep credentials if you use session cookies/auth
+    origin: function (origin, callback) {
+      // Define all known safe origins
+      const allowedOrigins = [
+        "https://thegreatbuying.com",
+        "https://checkout.shopify.com",
+        "https://www.amgadgets.com",
+        "https://amgadgets.com",
+      ];
+      
+      // CRITICAL FIX: Check if the origin is in the allowed list OR if it is 'null'
+      if (!origin || allowedOrigins.includes(origin) || origin === 'null') {
+        callback(null, true); // Allow the request
+      } else {
+        callback(new Error(`CORS policy violation for origin: ${origin}`), false); // Block the request
+      }
+    },
+    methods: ["GET", "POST"],
+    credentials: true, 
   })
 );
 
