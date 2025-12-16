@@ -2,6 +2,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import helmet from "helmet";
 
 // Load env variables
 dotenv.config();
@@ -13,6 +14,7 @@ dotenv.config();
 import clickTrackingRoutes from "./routes/clickTrackingRoutes.js";
 import conversionRoutes from "./routes/conversionRoutes.js";
 import pixelRoutes from "./routes/pixelRoutes.js";
+import adminRoutes from "./admin/admin.routes.js";
 
 
 const app = express();
@@ -20,13 +22,14 @@ const app = express();
 // CORS setup
 app.use(
   cors({
-    origin: function (origin, callback) {
+    origin: function (origin, callback) { 
       // Define all known safe origins
       const allowedOrigins = [
         "https://thegreatbuying.com",
         "https://checkout.shopify.com",
         "https://www.amgadgets.com",
         "https://amgadgets.com",
+        "http://localhost:5173",
       ];
       
       // CRITICAL FIX: Check if the origin is in the allowed list OR if it is 'null'
@@ -53,6 +56,13 @@ app.use("/api", pixelRoutes);
 app.get("/", (req, res) => {
   res.send("Tracking API Running 2...");
 });
+
+
+app.use(helmet());
+
+
+app.use("/api/admin", adminRoutes);
+
 
 // Start Server
 const PORT = process.env.PORT || 5000;
