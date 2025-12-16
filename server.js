@@ -15,6 +15,8 @@ import clickTrackingRoutes from "./routes/clickTrackingRoutes.js";
 import conversionRoutes from "./routes/conversionRoutes.js";
 import pixelRoutes from "./routes/pixelRoutes.js";
 import adminRoutes from "./admin/admin.routes.js";
+import adminAuthRoutes from "./routes/adminAuthRoutes.js";
+import adminDataRoutes from "./routes/adminDataRoutes.js";
 
 
 const app = express();
@@ -31,7 +33,7 @@ app.use(
         "https://amgadgets.com",
         "http://localhost:5173",
       ];
-      
+        
       // CRITICAL FIX: Check if the origin is in the allowed list OR if it is 'null'
       if (!origin || allowedOrigins.includes(origin) || origin === 'null') {
         callback(null, true); // Allow the request
@@ -50,6 +52,9 @@ app.use(express.json());
 app.use("/api", clickTrackingRoutes);
 app.use("/api", conversionRoutes);
 app.use("/api", pixelRoutes);
+
+app.use("/api/admin/auth", adminAuthRoutes);
+app.use("/api/admin", adminDataRoutes);
 
 
 // Default Route
