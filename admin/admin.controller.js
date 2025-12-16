@@ -11,3 +11,15 @@ export async function getClicks(req, res) {
 
   res.json(rows);
 }
+
+export async function getConversions(req, res) {
+  const { page = 1, limit = 50 } = req.query;
+  const offset = (page - 1) * limit;
+
+  const [rows] = await db.query(
+    "SELECT * FROM conversions ORDER BY created_at DESC LIMIT ? OFFSET ?",
+    [Number(limit), Number(offset)]
+  );
+
+  res.json(rows);
+}
