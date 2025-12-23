@@ -32,6 +32,7 @@ app.use(
         "https://www.amgadgets.com",
         "https://amgadgets.com",
         "http://localhost:5173",
+        "https://cmsfront-seven.vercel.app",
       ];
         
       // CRITICAL FIX: Check if the origin is in the allowed list OR if it is 'null'
