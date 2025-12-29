@@ -23,8 +23,16 @@ export const handlePostback = async (req, res) => {
       data.orderid ||
       null;
 
-    const payout = data.payout || data.amount || 0;
+       // ✅ FINAL MAPPING
+    const saleAmount = Number(
+      data.amount || data.sale_amount || data.total || 0
+    );
+
+    const commission = Number(data.payout || data.commission || 0);
     const status = data.status || "approved";
+
+    // const payout = data.payout || data.amount || 0;
+    // const status = data.status || "approved";
 
     if (!clickid) {
       return res.status(400).send("Missing clickid");
@@ -77,12 +85,20 @@ export const handlePostback = async (req, res) => {
     const payload = JSON.stringify(data);
 
     await db.query(
-      `
-      INSERT INTO conversions 
-      (clickid, click_id, payout, status, order_id, postback_payload)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `,
-      [clickid, click_row_id, payout, status, orderId, payload]
+    `
+      INSERT INTO conversions
+      (clickid, click_id, payout, commission, status, order_id, postback_payload)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `,
+      [
+        clickid,
+        click_row_id,
+        saleAmount,     // ✅ total sale
+        commission,     // ✅ your commission
+        status,
+        orderId,
+        payload
+      ]
     );
 
     return res.status(200).send("OK");
