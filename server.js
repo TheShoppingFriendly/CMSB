@@ -17,6 +17,7 @@ import pixelRoutes from "./routes/pixelRoutes.js";
 import adminRoutes from "./admin/admin.routes.js";
 import adminAuthRoutes from "./routes/adminAuthRoutes.js";
 import adminDataRoutes from "./routes/adminDataRoutes.js";
+import storeRoutes from "./routes/storeRoutes.js";
 
 
 const app = express();
@@ -53,6 +54,7 @@ app.use(express.json());
 app.use("/api", clickTrackingRoutes);
 app.use("/api", conversionRoutes);
 app.use("/api", pixelRoutes);
+app.use("/api/stores", storeRoutes);
 
 app.use("/api/admin/auth", adminAuthRoutes);
 app.use("/api/admin", adminDataRoutes);
