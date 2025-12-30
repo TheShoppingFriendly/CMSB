@@ -54,7 +54,7 @@ app.use(express.json());
 app.use("/api", clickTrackingRoutes);
 app.use("/api", conversionRoutes);
 app.use("/api", pixelRoutes);
-app.use("/api/stores", storeRoutes);
+app.use("/stores", storeRoutes);
 
 app.use("/api/admin/auth", adminAuthRoutes);
 app.use("/api/admin", adminDataRoutes);
