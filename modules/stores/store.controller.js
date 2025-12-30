@@ -35,18 +35,22 @@ export const getStoresForAdmin = async (req, res) => {
         s.id,
         s.name,
         s.slug,
-        -- Use 'payout' as total_sales and 'commission' as total_commission
         COALESCE(SUM(c.payout), 0) AS total_sales,
         COALESCE(SUM(c.commission), 0) AS total_commission
       FROM stores s
+      -- LEFT JOIN ensures stores show up even with 0 clicks
       LEFT JOIN click_tracking ct ON ct.campaign_id = s.id
-      -- Your schema shows 'click_id' is an integer, so no casting needed if ct.id is also integer
+      -- LEFT JOIN ensures stores show up even with 0 conversions
       LEFT JOIN conversions c ON c.click_id = ct.id
       GROUP BY s.id, s.name, s.slug
-      ORDER BY s.name
+      ORDER BY s.name ASC
     `);
 
-    res.json(result.rows);
+    // Log the count to your Render console for debugging
+    console.log(`Found ${result.rows.length} stores in DB`);
+
+    // Force a 200 OK status to avoid the 204 No Content issue
+    return res.status(200).json(result.rows);
   } catch (error) {
     console.error("SQL Error:", error.message);
     res.status(500).json({ error: error.message });
