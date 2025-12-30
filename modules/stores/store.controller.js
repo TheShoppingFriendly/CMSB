@@ -28,8 +28,6 @@ export const syncStores = async (req, res) => {
   res.json({ success: true });
 };
 
-
-
 export const getStoresForAdmin = async (req, res) => {
   try {
     const result = await db.query(`
@@ -37,21 +35,20 @@ export const getStoresForAdmin = async (req, res) => {
         s.id,
         s.name,
         s.slug,
-        COALESCE(SUM(c.total_sale_amount), 0) AS total_sales,
-        COALESCE(SUM(c.commission_amount), 0) AS total_commission
+        -- Use 'payout' as total_sales and 'commission' as total_commission
+        COALESCE(SUM(c.payout), 0) AS total_sales,
+        COALESCE(SUM(c.commission), 0) AS total_commission
       FROM stores s
-      -- First join: campaign_id is now an integer, matches s.id
       LEFT JOIN click_tracking ct ON ct.campaign_id = s.id
-      -- Second join: FORCE both sides to text to prevent the 500 error
-      LEFT JOIN conversions c ON c.click_id::text = ct.id::text
+      -- Your schema shows 'click_id' is an integer, so no casting needed if ct.id is also integer
+      LEFT JOIN conversions c ON c.click_id = ct.id
       GROUP BY s.id, s.name, s.slug
       ORDER BY s.name
     `);
 
     res.json(result.rows);
   } catch (error) {
-    // Check your Render "Logs" tab to see this specific output
-    console.error("SQL Execution Error:", error.message);
+    console.error("SQL Error:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
