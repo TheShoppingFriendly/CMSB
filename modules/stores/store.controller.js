@@ -58,76 +58,58 @@ export const getStoreCampaignDetails = async (req, res) => {
   const { slug } = req.params;
 
   try {
-    /** 1️⃣ Get store */
-    const storeResult = await db.query(
-      `SELECT id, name, slug FROM stores WHERE slug = $1`,
+    /* 1️⃣ Get store */
+    const storeRes = await db.query(
+      `SELECT id, name, slug, status FROM stores WHERE slug = $1`,
       [slug]
     );
 
-    if (storeResult.rowCount === 0) {
+    if (storeRes.rowCount === 0) {
       return res.status(404).json({ error: "Store not found" });
     }
 
-    const store = storeResult.rows[0];
+    const store = storeRes.rows[0];
 
-    /** 2️⃣ Get click IDs for this store */
-    const clicksResult = await db.query(
+    /* 2️⃣ Get conversions via click_tracking */
+    const conversionsRes = await db.query(
       `
-      SELECT id
-      FROM clicks
-      WHERE store_id = $1
+      SELECT 
+        c.id,
+        c.order_id,
+        c.payout,
+        c.commission,
+        c.status,
+        c.created_at
+      FROM conversions c
+      JOIN click_tracking ct 
+        ON ct.id = c.click_id
+      WHERE ct.campaign_id = $1
+      ORDER BY c.created_at DESC
       `,
       [store.id]
     );
 
-    const clickIds = clicksResult.rows.map(r => r.id);
-
-    if (clickIds.length === 0) {
-      return res.status(200).json({
-        store,
-        conversions: [],
-        totalRevenue: 0
-      });
-    }
-
-    /** 3️⃣ Fetch conversions via click_id */
-    const conversionsResult = await db.query(
+    /* 3️⃣ Total commission */
+    const revenueRes = await db.query(
       `
-      SELECT
-        id,
-        clickid,
-        order_id,
-        commission,
-        payout,
-        status,
-        source,
-        created_at
-      FROM conversions
-      WHERE click_id = ANY($1)
-      ORDER BY created_at DESC
+      SELECT COALESCE(SUM(c.commission), 0) AS total_revenue
+      FROM conversions c
+      JOIN click_tracking ct 
+        ON ct.id = c.click_id
+      WHERE ct.campaign_id = $1
       `,
-      [clickIds]
-    );
-
-    /** 4️⃣ Total revenue (commission) */
-    const revenueResult = await db.query(
-      `
-      SELECT COALESCE(SUM(commission), 0) AS total_revenue
-      FROM conversions
-      WHERE click_id = ANY($1)
-      `,
-      [clickIds]
+      [store.id]
     );
 
     return res.status(200).json({
       store,
-      conversions: conversionsResult.rows,
-      totalRevenue: Number(revenueResult.rows[0].total_revenue)
+      conversions: conversionsRes.rows,
+      totalRevenue: Number(revenueRes.rows[0].total_revenue),
     });
 
-  } catch (error) {
-    console.error("Campaign Fetch Error:", error.message);
-    return res.status(500).json({ error: "Failed to fetch campaign data" });
+  } catch (err) {
+    console.error("Campaign Fetch Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch campaign data" });
   }
 };
 
