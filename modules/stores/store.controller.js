@@ -1,5 +1,9 @@
 import db from "../../db.js";
 
+/**
+ * WordPress → Backend
+ * Sync stores
+ */
 export const syncStores = async (req, res) => {
   const { stores } = req.body;
 
@@ -28,6 +32,9 @@ export const syncStores = async (req, res) => {
   res.json({ success: true });
 };
 
+/**
+ * Admin CMS → Get all stores
+ */
 export const getStoresForAdmin = async (req, res) => {
   try {
     const result = await db.query(`
@@ -35,11 +42,69 @@ export const getStoresForAdmin = async (req, res) => {
       FROM stores 
       ORDER BY id DESC
     `);
-    
-    // Explicitly return a 200 OK with the rows
+
     return res.status(200).json(result.rows);
   } catch (error) {
     console.error("Fetch Error:", error.message);
     res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * 🔥 NEW: Admin CMS → Store Campaign Page
+ * GET /api/stores/:slug/campaign
+ */
+export const getStoreCampaignDetails = async (req, res) => {
+  const { slug } = req.params;
+
+  try {
+    /** 1️⃣ Fetch store */
+    const storeResult = await db.query(
+      `SELECT id, name, slug, status FROM stores WHERE slug = $1`,
+      [slug]
+    );
+
+    if (storeResult.rowCount === 0) {
+      return res.status(404).json({ error: "Store not found" });
+    }
+
+    const store = storeResult.rows[0];
+
+    /** 2️⃣ Fetch conversions linked via campaign_id */
+    const conversionsResult = await db.query(
+      `
+      SELECT 
+        id,
+        order_id,
+        amount,
+        commission,
+        status,
+        created_at
+      FROM conversions
+      WHERE campaign_id = $1
+      ORDER BY created_at DESC
+      `,
+      [store.id]
+    );
+
+    /** 3️⃣ Calculate total revenue */
+    const revenueResult = await db.query(
+      `
+      SELECT COALESCE(SUM(commission), 0) AS total_revenue
+      FROM conversions
+      WHERE campaign_id = $1
+      `,
+      [store.id]
+    );
+
+    return res.status(200).json({
+      store,
+      conversions: conversionsResult.rows,
+      totalRevenue: Number(revenueResult.rows[0].total_revenue),
+    });
+
+  } catch (error) {
+    console.error("Campaign Fetch Error:", error.message);
+    res.status(500).json({ error: "Failed to fetch campaign data" });
   }
 };
