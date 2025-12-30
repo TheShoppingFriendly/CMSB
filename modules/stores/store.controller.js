@@ -70,41 +70,65 @@ export const getStoreCampaignDetails = async (req, res) => {
 
     const store = storeResult.rows[0];
 
-    /** 2️⃣ Fetch conversions linked via campaign_id */
+    /** 2️⃣ Fetch campaigns for this store */
+    const campaignResult = await db.query(
+      `
+      SELECT id, title
+      FROM campaigns
+      WHERE store_id = $1
+      `,
+      [store.id]
+    );
+
+    const campaignIds = campaignResult.rows.map(c => c.id);
+
+    if (campaignIds.length === 0) {
+      return res.status(200).json({
+        store,
+        campaigns: [],
+        conversions: [],
+        totalRevenue: 0
+      });
+    }
+
+    /** 3️⃣ Fetch conversions */
     const conversionsResult = await db.query(
       `
       SELECT 
         id,
+        campaign_id,
         order_id,
         amount,
         commission,
         status,
         created_at
       FROM conversions
-      WHERE campaign_id = $1
+      WHERE campaign_id = ANY($1)
       ORDER BY created_at DESC
       `,
-      [store.id]
+      [campaignIds]
     );
 
-    /** 3️⃣ Calculate total revenue */
+    /** 4️⃣ Total revenue */
     const revenueResult = await db.query(
       `
       SELECT COALESCE(SUM(commission), 0) AS total_revenue
       FROM conversions
-      WHERE campaign_id = $1
+      WHERE campaign_id = ANY($1)
       `,
-      [store.id]
+      [campaignIds]
     );
 
     return res.status(200).json({
       store,
+      campaigns: campaignResult.rows,
       conversions: conversionsResult.rows,
-      totalRevenue: Number(revenueResult.rows[0].total_revenue),
+      totalRevenue: Number(revenueResult.rows[0].total_revenue)
     });
 
   } catch (error) {
-    console.error("Campaign Fetch Error:", error.message);
-    res.status(500).json({ error: "Failed to fetch campaign data" });
+    console.error("Campaign Fetch Error:", error);
+    return res.status(500).json({ error: "Failed to fetch campaign data" });
   }
 };
+
