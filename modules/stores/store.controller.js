@@ -58,9 +58,9 @@ export const getStoreCampaignDetails = async (req, res) => {
   const { slug } = req.params;
 
   try {
-    /** 1️⃣ Fetch store */
+    /** 1️⃣ Get store */
     const storeResult = await db.query(
-      `SELECT id, name, slug, status FROM stores WHERE slug = $1`,
+      `SELECT id, name, slug FROM stores WHERE slug = $1`,
       [slug]
     );
 
@@ -70,64 +70,63 @@ export const getStoreCampaignDetails = async (req, res) => {
 
     const store = storeResult.rows[0];
 
-    /** 2️⃣ Fetch campaigns for this store */
-    const campaignResult = await db.query(
+    /** 2️⃣ Get click IDs for this store */
+    const clicksResult = await db.query(
       `
-      SELECT id, title
-      FROM campaigns
+      SELECT id
+      FROM clicks
       WHERE store_id = $1
       `,
       [store.id]
     );
 
-    const campaignIds = campaignResult.rows.map(c => c.id);
+    const clickIds = clicksResult.rows.map(r => r.id);
 
-    if (campaignIds.length === 0) {
+    if (clickIds.length === 0) {
       return res.status(200).json({
         store,
-        campaigns: [],
         conversions: [],
         totalRevenue: 0
       });
     }
 
-    /** 3️⃣ Fetch conversions */
+    /** 3️⃣ Fetch conversions via click_id */
     const conversionsResult = await db.query(
       `
-      SELECT 
+      SELECT
         id,
-        campaign_id,
+        clickid,
         order_id,
-        amount,
         commission,
+        payout,
         status,
+        source,
         created_at
       FROM conversions
-      WHERE campaign_id = ANY($1)
+      WHERE click_id = ANY($1)
       ORDER BY created_at DESC
       `,
-      [campaignIds]
+      [clickIds]
     );
 
-    /** 4️⃣ Total revenue */
+    /** 4️⃣ Total revenue (commission) */
     const revenueResult = await db.query(
       `
       SELECT COALESCE(SUM(commission), 0) AS total_revenue
       FROM conversions
-      WHERE campaign_id = ANY($1)
+      WHERE click_id = ANY($1)
       `,
-      [campaignIds]
+      [clickIds]
     );
 
     return res.status(200).json({
       store,
-      campaigns: campaignResult.rows,
       conversions: conversionsResult.rows,
       totalRevenue: Number(revenueResult.rows[0].total_revenue)
     });
 
   } catch (error) {
-    console.error("Campaign Fetch Error:", error);
+    console.error("Campaign Fetch Error:", error.message);
     return res.status(500).json({ error: "Failed to fetch campaign data" });
   }
 };
