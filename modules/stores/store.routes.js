@@ -1,7 +1,7 @@
 import express from "express";
 import { syncStores, getStoresForAdmin } from "./store.controller.js";
 import apiKeyAuth from "../../middleware/apiKeyAuth.js";
-import adminAuth from "../../middleware/adminAuth.js";
+import { adminAuth } from "../../middleware/adminAuth.js";
 
 const router = express.Router();
 
