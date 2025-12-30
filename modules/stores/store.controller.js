@@ -73,18 +73,19 @@ export const getStoreCampaignDetails = async (req, res) => {
     /* 2️⃣ Get conversions via click_tracking */
     const conversionsRes = await db.query(
       `
-      SELECT 
-        c.id,
-        c.order_id,
-        c.payout,
-        c.commission,
-        c.status,
-        c.created_at
-      FROM conversions c
-      JOIN click_tracking ct 
-        ON ct.id = c.click_id
-      WHERE ct.campaign_id = $1
-      ORDER BY c.created_at DESC
+   SELECT 
+  c.id,
+  c.clickid,
+  c.order_id,
+  c.payout,
+  c.commission,
+  c.status,
+  c.created_at
+FROM conversions c
+JOIN click_tracking ct 
+  ON ct.id = c.click_id
+WHERE ct.campaign_id = $1
+ORDER BY c.created_at DESC
       `,
       [store.id]
     );
