@@ -1,5 +1,5 @@
 import express from "express";
-import { getAllUsers, updateUserBalance, syncUser, getUserActivity } from "./user.controller.js";
+import { getAllUsers, updateUserBalance, syncUsers, getUserActivity } from "./user.controller.js";
 import { adminAuth } from "../../middleware/adminAuth.js";
 import  apiKeyAuth  from "../../middleware/apiKeyAuth.js";
 
