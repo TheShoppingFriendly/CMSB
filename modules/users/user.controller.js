@@ -3,7 +3,6 @@ import db from "../../db.js";
 // 1. Sync Users from WordPress (UPSERT logic)
 export const syncUsers = async (req, res) => {
   const { users } = req.body;
-
   if (!Array.isArray(users)) {
     return res.status(400).json({ error: "Invalid user data format" });
   }
@@ -67,5 +66,42 @@ export const updateUserBalance = async (req, res) => {
   } catch (error) {
     await db.query("ROLLBACK");
     res.status(500).json({ error: error.message });
+  }
+};
+
+// 4. NEW: Fetch User Specific Activity (Clicks, Conversions, and Logs)
+export const getUserActivity = async (req, res) => {
+  const { id } = req.params; // This is the wp_user_id from the URL
+
+  try {
+    // Fetch Clicks
+    const clicks = await db.query(
+      `SELECT clickid, ip_address, created_at FROM clicks 
+       WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      [id]
+    );
+
+    // Fetch Conversions
+    const conversions = await db.query(
+      `SELECT campaign_name, payout, status, created_at FROM conversions 
+       WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      [id]
+    );
+
+    // Fetch Audit Logs (Balance History)
+    const logs = await db.query(
+      `SELECT amount_changed, new_balance, reason, created_at FROM balance_logs 
+       WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      [id]
+    );
+
+    res.json({
+      clicks: clicks.rows,
+      conversions: conversions.rows,
+      logs: logs.rows
+    });
+  } catch (error) {
+    console.error("Activity Fetch Error:", error.message);
+    res.status(500).json({ error: "Failed to fetch user history" });
   }
 };
