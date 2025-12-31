@@ -74,36 +74,43 @@ export const getUserActivity = async (req, res) => {
   const { id } = req.params; 
 
   try {
-    // 1. Validate that the ID exists and is a number
     if (!id) return res.status(400).json({ error: "Missing user ID" });
 
-    // 2. Run queries with individual error handling to pinpoint the crash
+    // 1. Fix: Table name is 'click_tracking', not 'clicks'
     const clicksPromise = db.query(
-      `SELECT clickid, ip_address, created_at FROM clicks 
-       WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      `SELECT clickid, ip_address, created_at 
+       FROM click_tracking 
+       WHERE wp_user_id = $1 
+       ORDER BY created_at DESC LIMIT 20`,
       [id]
     ).catch(e => { console.error("Clicks Table Error:", e.message); return { rows: [] }; });
 
+    // 2. Fix: Conversions table doesn't have campaign_name or wp_user_id. 
+    // We must JOIN with click_tracking to find out which user and campaign it belongs to.
     const conversionsPromise = db.query(
-      `SELECT campaign_name, payout, status, created_at FROM conversions 
-       WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      `SELECT ct.clickid, c.payout, c.status, c.created_at 
+       FROM conversions c
+       JOIN click_tracking ct ON c.click_id = ct.id
+       WHERE ct.wp_user_id = $1 
+       ORDER BY c.created_at DESC LIMIT 20`,
       [id]
     ).catch(e => { console.error("Conversions Table Error:", e.message); return { rows: [] }; });
 
+    // 3. Balance Logs
     const logsPromise = db.query(
-      `SELECT amount_changed, new_balance, reason, created_at FROM balance_logs 
-       WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 20`,
+      `SELECT amount_changed, new_balance, reason, created_at 
+       FROM balance_logs 
+       WHERE wp_user_id = $1 
+       ORDER BY created_at DESC LIMIT 20`,
       [id]
     ).catch(e => { console.error("Logs Table Error:", e.message); return { rows: [] }; });
 
-    // 3. Execute all queries
     const [clicks, conversions, logs] = await Promise.all([
       clicksPromise,
       conversionsPromise,
       logsPromise
     ]);
 
-    // 4. Return the data (ensure we send .rows)
     res.json({
       clicks: clicks.rows || [],
       conversions: conversions.rows || [],
@@ -112,6 +119,6 @@ export const getUserActivity = async (req, res) => {
 
   } catch (error) {
     console.error("Critical Controller Error:", error.message);
-    res.status(500).json({ error: "Internal Server Error", details: error.message });
+    res.status(500).json({ error: "Internal Server Error" });
   }
 };
