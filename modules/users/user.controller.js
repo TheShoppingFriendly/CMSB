@@ -71,37 +71,47 @@ export const updateUserBalance = async (req, res) => {
 
 // 4. NEW: Fetch User Specific Activity (Clicks, Conversions, and Logs)
 export const getUserActivity = async (req, res) => {
-  const { id } = req.params; // This is the wp_user_id from the URL
+  const { id } = req.params; 
 
   try {
-    // Fetch Clicks
-    const clicks = await db.query(
+    // 1. Validate that the ID exists and is a number
+    if (!id) return res.status(400).json({ error: "Missing user ID" });
+
+    // 2. Run queries with individual error handling to pinpoint the crash
+    const clicksPromise = db.query(
       `SELECT clickid, ip_address, created_at FROM clicks 
        WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 20`,
       [id]
-    );
+    ).catch(e => { console.error("Clicks Table Error:", e.message); return { rows: [] }; });
 
-    // Fetch Conversions
-    const conversions = await db.query(
+    const conversionsPromise = db.query(
       `SELECT campaign_name, payout, status, created_at FROM conversions 
        WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 20`,
       [id]
-    );
+    ).catch(e => { console.error("Conversions Table Error:", e.message); return { rows: [] }; });
 
-    // Fetch Audit Logs (Balance History)
-    const logs = await db.query(
+    const logsPromise = db.query(
       `SELECT amount_changed, new_balance, reason, created_at FROM balance_logs 
        WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 20`,
       [id]
-    );
+    ).catch(e => { console.error("Logs Table Error:", e.message); return { rows: [] }; });
 
+    // 3. Execute all queries
+    const [clicks, conversions, logs] = await Promise.all([
+      clicksPromise,
+      conversionsPromise,
+      logsPromise
+    ]);
+
+    // 4. Return the data (ensure we send .rows)
     res.json({
-      clicks: clicks.rows,
-      conversions: conversions.rows,
-      logs: logs.rows
+      clicks: clicks.rows || [],
+      conversions: conversions.rows || [],
+      logs: logs.rows || []
     });
+
   } catch (error) {
-    console.error("Activity Fetch Error:", error.message);
-    res.status(500).json({ error: "Failed to fetch user history" });
+    console.error("Critical Controller Error:", error.message);
+    res.status(500).json({ error: "Internal Server Error", details: error.message });
   }
 };
