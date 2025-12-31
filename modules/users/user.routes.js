@@ -1,7 +1,7 @@
 import express from "express";
 import { getAllUsers, updateUserBalance, syncUsers } from "./user.controller.js";
 import { adminAuth } from "../../middleware/adminAuth.js";
-import { apiKeyAuth } from "../../middleware/apiKeyAuth.js";
+import  apiKeyAuth  from "../../middleware/apiKeyAuth.js";
 
 const router = express.Router();
 
