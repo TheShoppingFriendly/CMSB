@@ -76,7 +76,7 @@ export const getUserActivity = async (req, res) => {
   try {
     if (!id) return res.status(400).json({ error: "Missing user ID" });
 
-    // 1. Fix: Table name is 'click_tracking', not 'clicks'
+    // 1. Clicks from 'click_tracking'
     const clicksPromise = db.query(
       `SELECT clickid, ip_address, created_at 
        FROM click_tracking 
@@ -85,10 +85,16 @@ export const getUserActivity = async (req, res) => {
       [id]
     ).catch(e => { console.error("Clicks Table Error:", e.message); return { rows: [] }; });
 
-    // 2. Fix: Conversions table doesn't have campaign_name or wp_user_id. 
-    // We must JOIN with click_tracking to find out which user and campaign it belongs to.
+    // 2. Updated: Conversions JOIN click_tracking
+    // Added ct.campaign_id and c.commission to the SELECT list
     const conversionsPromise = db.query(
-      `SELECT ct.clickid, c.payout, c.status, c.created_at 
+      `SELECT 
+        ct.clickid, 
+        ct.campaign_id, 
+        c.payout, 
+        c.commission, 
+        c.status, 
+        c.created_at 
        FROM conversions c
        JOIN click_tracking ct ON c.click_id = ct.id
        WHERE ct.wp_user_id = $1 
