@@ -1,4 +1,4 @@
-import db from "../../db.js"; // Ensure path matches your project structure
+import db from "../db.js"; // Ensure path matches your project structure
 
 export const getPublicUserStats = async (req, res) => {
   const { wp_user_id } = req.params;
