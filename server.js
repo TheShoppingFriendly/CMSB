@@ -19,6 +19,7 @@ import adminAuthRoutes from "./routes/adminAuthRoutes.js";
 import adminDataRoutes from "./routes/adminDataRoutes.js";
 import storeRoutes from "./modules/stores/store.routes.js";
 import userRoutes from "./modules/users/user.routes.js";
+import publicRoutes from "./routes/public.routes.js";
 
 const app = express();
 
@@ -59,6 +60,9 @@ app.use("/api/users", userRoutes);
 
 app.use("/api/admin/auth", adminAuthRoutes);
 app.use("/api/admin", adminDataRoutes);
+
+app.use("/api/public", publicRoutes);
+
 
 
 // Default Route
