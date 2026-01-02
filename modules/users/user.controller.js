@@ -37,62 +37,50 @@ export const getAllUsers = async (req, res) => {
 // 3. Manual Balance Update & Conversion Settlement
 // This handles the "Before/After" snapshot and tags conversions
 export const updateUserBalance = async (req, res) => {
-  const { wp_user_id, conversion_ids, reason } = req.body;
+  const { wp_user_id, settlements, reason } = req.body; // settlements = [{id, amount}, ...]
   const adminId = req.admin ? req.admin.id : null;
 
   try {
     await db.query("BEGIN");
 
-    // A. Snapshot "Before" Balance
-    const userRes = await db.query(
-      "SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", 
-      [wp_user_id]
-    );
-    if (userRes.rows.length === 0) throw new Error("User not found.");
+    // 1. Snapshot Current Balance
+    const userRes = await db.query("SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", [wp_user_id]);
     const prevBalance = parseFloat(userRes.rows[0].current_balance || 0);
 
-    // B. Calculate Payout & Verify Ownership via JOIN
-    const convRes = await db.query(
-      `SELECT c.id, c.payout, ct.campaign_id 
-       FROM conversions c
-       JOIN click_tracking ct ON c.click_id = ct.id
-       WHERE c.id = ANY($1) 
-       AND ct.wp_user_id = $2 
-       AND c.payout_status = 'pending'`,
-      [conversion_ids, wp_user_id]
-    );
+    // 2. Calculate Total from the Custom Amounts sent by Admin
+    const totalDelta = settlements.reduce((sum, item) => sum + parseFloat(item.amount), 0);
 
-    if (convRes.rows.length === 0) throw new Error("No eligible pending conversions found.");
-
-    const amountToAdd = convRes.rows.reduce((sum, row) => sum + parseFloat(row.payout), 0);
-    const summary = `Paid ${convRes.rows.length} items: ${convRes.rows.map(r => r.campaign_id).join(", ")}`;
-
-    // C. Update Balance (Snapshot "After")
+    // 3. Update User Balance
     const updateRes = await db.query(
       `UPDATE users SET current_balance = current_balance + $1, total_earned = total_earned + $1
        WHERE wp_user_id = $2 RETURNING current_balance`,
-      [amountToAdd, wp_user_id]
+      [totalDelta, wp_user_id]
     );
     const newBal = parseFloat(updateRes.rows[0].current_balance);
 
-    // D. Create Audit Log with Snapshot
+    // 4. Log the Audit Trail
     const logRes = await db.query(
-      `INSERT INTO balance_logs (wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, admin_id, campaign_summary)
-       VALUES ($1, $2, $3, $4, 'settlement', $5, $6, $7) RETURNING id`,
-      [wp_user_id, amountToAdd, prevBalance, newBal, reason, adminId, summary]
+      `INSERT INTO balance_logs (wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, admin_id)
+       VALUES ($1, $2, $3, $4, 'settlement', $5, $6) RETURNING id`,
+      [wp_user_id, totalDelta, prevBalance, newBal, reason, adminId]
     );
 
-    // E. Tag Conversions as Approved and link to Log
-    await db.query(
-      "UPDATE conversions SET payout_status = 'approved', log_id = $1 WHERE id = ANY($2)",
-      [logRes.rows[0].id, conversion_ids]
-    );
+    // 5. Update each individual conversion with the ACTUAL amount paid
+    for (const item of settlements) {
+      await db.query(
+        `UPDATE conversions 
+         SET payout_status = 'approved', 
+             actual_paid_amount = $1, 
+             log_id = $2 
+         WHERE id = $3`,
+        [item.amount, logRes.rows[0].id, item.id]
+      );
+    }
 
     await db.query("COMMIT");
-    res.json({ success: true, newBalance: newBal, amountAdded: amountToAdd });
+    res.json({ success: true, newBalance: newBal });
   } catch (error) {
     await db.query("ROLLBACK");
-    console.error("Settlement Error:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
