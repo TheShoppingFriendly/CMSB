@@ -7,7 +7,7 @@ export const getPublicUserStats = async (req, res) => {
     try {
         // 1. SECURITY: Check API Key against environment variable
         // Make sure you have BACKEND_API_KEY in your Render Env Variables
-        if (!apiKey || apiKey !== process.env.BACKEND_API_KEY) {
+        if (!apiKey || apiKey !== process.env.WP_API_KEY) {
             return res.status(403).json({ error: "Access denied. Invalid API Key." });
         }
 
