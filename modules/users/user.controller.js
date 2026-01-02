@@ -1,6 +1,6 @@
 import db from "../../db.js";
 
-// 1. Sync Users from WordPress (UPSERT logic)
+// 1. Sync Users from WordPress (UPSERT logic) - NO CHANGES
 export const syncUsers = async (req, res) => {
   const { users } = req.body;
   if (!Array.isArray(users)) {
@@ -24,7 +24,7 @@ export const syncUsers = async (req, res) => {
   }
 };
 
-// 2. Fetch all users for Admin Dashboard
+// 2. Fetch all users for Admin Dashboard - NO CHANGES
 export const getAllUsers = async (req, res) => {
   try {
     const result = await db.query(`SELECT * FROM users ORDER BY synced_at DESC`);
@@ -34,10 +34,10 @@ export const getAllUsers = async (req, res) => {
   }
 };
 
-// 3. Manual Balance Update & Conversion Settlement
-// This handles the "Before/After" snapshot and tags conversions
+// 3. UPDATED: Manual Balance Update & Conversion Settlement
+// Now handles custom amounts, lock days (release date), and Cashback
 export const updateUserBalance = async (req, res) => {
-  const { wp_user_id, settlements, reason } = req.body; // settlements = [{id, amount}, ...]
+  const { wp_user_id, settlements, reason } = req.body; 
   const adminId = req.admin ? req.admin.id : null;
 
   try {
@@ -47,10 +47,10 @@ export const updateUserBalance = async (req, res) => {
     const userRes = await db.query("SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", [wp_user_id]);
     const prevBalance = parseFloat(userRes.rows[0].current_balance || 0);
 
-    // 2. Calculate Total from the Custom Amounts sent by Admin
+    // 2. Calculate Total from the Custom Amounts (supports negative for Cashback)
     const totalDelta = settlements.reduce((sum, item) => sum + parseFloat(item.amount), 0);
 
-    // 3. Update User Balance
+    // 3. Update User Balance & Total Earned
     const updateRes = await db.query(
       `UPDATE users SET current_balance = current_balance + $1, total_earned = total_earned + $1
        WHERE wp_user_id = $2 RETURNING current_balance`,
@@ -58,22 +58,28 @@ export const updateUserBalance = async (req, res) => {
     );
     const newBal = parseFloat(updateRes.rows[0].current_balance);
 
-    // 4. Log the Audit Trail
+    // 4. Log the Audit Trail (Status defaults to 'active')
     const logRes = await db.query(
       `INSERT INTO balance_logs (wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, admin_id)
        VALUES ($1, $2, $3, $4, 'settlement', $5, $6) RETURNING id`,
       [wp_user_id, totalDelta, prevBalance, newBal, reason, adminId]
     );
+    const logId = logRes.rows[0].id;
 
-    // 5. Update each individual conversion with the ACTUAL amount paid
+    // 5. Update each individual conversion with Actual Amount + Release Date
     for (const item of settlements) {
+      const days = parseInt(item.lock_days) || 0;
+      const releaseDate = new Date();
+      releaseDate.setDate(releaseDate.getDate() + days);
+
       await db.query(
         `UPDATE conversions 
          SET payout_status = 'approved', 
              actual_paid_amount = $1, 
-             log_id = $2 
-         WHERE id = $3`,
-        [item.amount, logRes.rows[0].id, item.id]
+             log_id = $2,
+             release_date = $3 
+         WHERE id = $4`,
+        [item.amount, logId, releaseDate, item.id]
       );
     }
 
@@ -85,7 +91,51 @@ export const updateUserBalance = async (req, res) => {
   }
 };
 
-// 4. Fetch User Specific Activity (Clicks, Conversions, and Audited Logs)
+// 4. NEW: Revert Settlement (Handles reversing both Payments and Cashbacks)
+export const revertSettlement = async (req, res) => {
+  const { log_id } = req.body;
+  try {
+    await db.query("BEGIN");
+
+    // 1. Get the original log
+    const logRes = await db.query("SELECT * FROM balance_logs WHERE id = $1 AND status != 'reverted'", [log_id]);
+    if (logRes.rows.length === 0) throw new Error("Transaction not found or already reverted.");
+    
+    const { wp_user_id, amount_changed } = logRes.rows[0];
+
+    // 2. Mathematically reverse the balance change (Subtracting a negative adds it back)
+    await db.query(
+      `UPDATE users 
+       SET current_balance = current_balance - $1, 
+           total_earned = total_earned - $1 
+       WHERE wp_user_id = $2`,
+      [amount_changed, wp_user_id]
+    );
+
+    // 3. Reset linked conversions back to pending
+    await db.query(
+      `UPDATE conversions 
+       SET payout_status = 'pending', 
+           actual_paid_amount = NULL, 
+           log_id = NULL, 
+           release_date = NULL 
+       WHERE log_id = $1`,
+      [log_id]
+    );
+
+    // 4. Mark the log as reverted
+    await db.query("UPDATE balance_logs SET status = 'reverted' WHERE id = $1", [log_id]);
+
+    await db.query("COMMIT");
+    res.json({ success: true, message: "Transaction reverted successfully." });
+  } catch (error) {
+    await db.query("ROLLBACK");
+    console.error("Reversal Error:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// 5. Fetch User Specific Activity - UPDATED to include new fields
 export const getUserActivity = async (req, res) => {
   const { id } = req.params; 
 
@@ -99,16 +149,18 @@ export const getUserActivity = async (req, res) => {
       [id]
     ).catch(e => ({ rows: [] }));
 
-    // B. Conversions (Crucial: Included ID and payout_status for Frontend logic)
+    // B. Conversions (Now includes release_date and actual_paid_amount)
     const conversions = await db.query(
       `SELECT 
         c.id, 
         ct.clickid, 
         ct.campaign_id, 
         c.payout, 
+        c.actual_paid_amount,
         c.commission, 
         c.status, 
         c.payout_status,
+        c.release_date,
         c.created_at 
        FROM conversions c
        JOIN click_tracking ct ON c.click_id = ct.id
@@ -117,13 +169,15 @@ export const getUserActivity = async (req, res) => {
       [id]
     ).catch(e => ({ rows: [] }));
 
-    // C. Balance Logs (Included Snapshots for the Ledger table)
+    // C. Balance Logs (Now includes id and status for reversal logic)
     const logs = await db.query(
       `SELECT 
+        id,
         amount_changed, 
         previous_balance, 
         new_balance, 
         reason, 
+        status,
         campaign_summary, 
         created_at 
        FROM balance_logs 
