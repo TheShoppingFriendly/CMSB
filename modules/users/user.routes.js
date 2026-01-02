@@ -1,5 +1,5 @@
 import express from "express";
-import { getAllUsers, updateUserBalance, syncUsers, getUserActivity } from "./user.controller.js";
+import { getAllUsers, updateUserBalance, syncUsers, getUserActivity, revertSettlement } from "./user.controller.js";
 import { adminAuth } from "../../middleware/adminAuth.js";
 import  apiKeyAuth  from "../../middleware/apiKeyAuth.js";
 
@@ -12,5 +12,6 @@ router.post("/sync", apiKeyAuth, syncUsers);
 router.get("/", adminAuth, getAllUsers);
 router.patch("/update-balance", adminAuth, updateUserBalance);
 router.get("/:id/activity", adminAuth, getUserActivity);
+router.post("/revert-settlement", revertSettlement);
 
 export default router;
