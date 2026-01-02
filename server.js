@@ -43,7 +43,7 @@ app.use(
         callback(new Error(`CORS policy violation for origin: ${origin}`), false); // Block the request
       }
     },
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "PATCH"],
     credentials: true, 
   })
 );
