@@ -34,97 +34,124 @@ export const getAllUsers = async (req, res) => {
   }
 };
 
-// 3. Manual Balance Update with Audit Logging
+// 3. Manual Balance Update & Conversion Settlement
+// This handles the "Before/After" snapshot and tags conversions
 export const updateUserBalance = async (req, res) => {
-  const { wp_user_id, amount, reason } = req.body;
-  const adminId = req.admin ? req.admin.id : null; 
+  const { wp_user_id, conversion_ids, reason } = req.body;
+  const adminId = req.admin ? req.admin.id : null;
 
   try {
     await db.query("BEGIN");
 
-    const userUpdate = await db.query(
-      `UPDATE users 
-       SET current_balance = current_balance + $1, 
-           total_earned = CASE WHEN $1 > 0 THEN total_earned + $1 ELSE total_earned END
-       WHERE wp_user_id = $2 
-       RETURNING current_balance`,
-      [amount, wp_user_id]
+    // A. Snapshot "Before" Balance
+    const userRes = await db.query(
+      "SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", 
+      [wp_user_id]
+    );
+    if (userRes.rows.length === 0) throw new Error("User not found.");
+    const prevBalance = parseFloat(userRes.rows[0].current_balance || 0);
+
+    // B. Calculate Payout & Verify Ownership via JOIN
+    const convRes = await db.query(
+      `SELECT c.id, c.payout, ct.campaign_id 
+       FROM conversions c
+       JOIN click_tracking ct ON c.click_id = ct.id
+       WHERE c.id = ANY($1) 
+       AND ct.wp_user_id = $2 
+       AND c.payout_status = 'pending'`,
+      [conversion_ids, wp_user_id]
     );
 
-    if (userUpdate.rows.length === 0) throw new Error("User not found.");
+    if (convRes.rows.length === 0) throw new Error("No eligible pending conversions found.");
 
-    const newBalance = userUpdate.rows[0].current_balance;
+    const amountToAdd = convRes.rows.reduce((sum, row) => sum + parseFloat(row.payout), 0);
+    const summary = `Paid ${convRes.rows.length} items: ${convRes.rows.map(r => r.campaign_id).join(", ")}`;
 
+    // C. Update Balance (Snapshot "After")
+    const updateRes = await db.query(
+      `UPDATE users SET current_balance = current_balance + $1, total_earned = total_earned + $1
+       WHERE wp_user_id = $2 RETURNING current_balance`,
+      [amountToAdd, wp_user_id]
+    );
+    const newBal = parseFloat(updateRes.rows[0].current_balance);
+
+    // D. Create Audit Log with Snapshot
+    const logRes = await db.query(
+      `INSERT INTO balance_logs (wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, admin_id, campaign_summary)
+       VALUES ($1, $2, $3, $4, 'settlement', $5, $6, $7) RETURNING id`,
+      [wp_user_id, amountToAdd, prevBalance, newBal, reason, adminId, summary]
+    );
+
+    // E. Tag Conversions as Approved and link to Log
     await db.query(
-      `INSERT INTO balance_logs (wp_user_id, amount_changed, new_balance, action_type, reason, admin_id)
-       VALUES ($1, $2, $3, 'admin_adjustment', $4, $5)`,
-      [wp_user_id, amount, newBalance, reason || "Manual adjustment", adminId]
+      "UPDATE conversions SET payout_status = 'approved', log_id = $1 WHERE id = ANY($2)",
+      [logRes.rows[0].id, conversion_ids]
     );
 
     await db.query("COMMIT");
-    res.json({ success: true, newBalance });
+    res.json({ success: true, newBalance: newBal, amountAdded: amountToAdd });
   } catch (error) {
     await db.query("ROLLBACK");
+    console.error("Settlement Error:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
 
-// 4. NEW: Fetch User Specific Activity (Clicks, Conversions, and Logs)
+// 4. Fetch User Specific Activity (Clicks, Conversions, and Audited Logs)
 export const getUserActivity = async (req, res) => {
   const { id } = req.params; 
 
   try {
     if (!id) return res.status(400).json({ error: "Missing user ID" });
 
-    // 1. Clicks from 'click_tracking'
-    const clicksPromise = db.query(
-      `SELECT clickid, ip_address, created_at 
-       FROM click_tracking 
-       WHERE wp_user_id = $1 
-       ORDER BY created_at DESC LIMIT 20`,
+    // A. Clicks
+    const clicks = await db.query(
+      `SELECT clickid, ip_address, created_at FROM click_tracking 
+       WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 50`,
       [id]
-    ).catch(e => { console.error("Clicks Table Error:", e.message); return { rows: [] }; });
+    ).catch(e => ({ rows: [] }));
 
-    // 2. Updated: Conversions JOIN click_tracking
-    // Added ct.campaign_id and c.commission to the SELECT list
-    const conversionsPromise = db.query(
+    // B. Conversions (Crucial: Included ID and payout_status for Frontend logic)
+    const conversions = await db.query(
       `SELECT 
+        c.id, 
         ct.clickid, 
         ct.campaign_id, 
         c.payout, 
         c.commission, 
         c.status, 
+        c.payout_status,
         c.created_at 
        FROM conversions c
        JOIN click_tracking ct ON c.click_id = ct.id
        WHERE ct.wp_user_id = $1 
-       ORDER BY c.created_at DESC LIMIT 20`,
+       ORDER BY c.created_at DESC`,
       [id]
-    ).catch(e => { console.error("Conversions Table Error:", e.message); return { rows: [] }; });
+    ).catch(e => ({ rows: [] }));
 
-    // 3. Balance Logs
-    const logsPromise = db.query(
-      `SELECT amount_changed, new_balance, reason, created_at 
+    // C. Balance Logs (Included Snapshots for the Ledger table)
+    const logs = await db.query(
+      `SELECT 
+        amount_changed, 
+        previous_balance, 
+        new_balance, 
+        reason, 
+        campaign_summary, 
+        created_at 
        FROM balance_logs 
        WHERE wp_user_id = $1 
-       ORDER BY created_at DESC LIMIT 20`,
+       ORDER BY created_at DESC`,
       [id]
-    ).catch(e => { console.error("Logs Table Error:", e.message); return { rows: [] }; });
-
-    const [clicks, conversions, logs] = await Promise.all([
-      clicksPromise,
-      conversionsPromise,
-      logsPromise
-    ]);
+    ).catch(e => ({ rows: [] }));
 
     res.json({
-      clicks: clicks.rows || [],
-      conversions: conversions.rows || [],
-      logs: logs.rows || []
+      clicks: clicks.rows,
+      conversions: conversions.rows,
+      logs: logs.rows
     });
 
   } catch (error) {
-    console.error("Critical Controller Error:", error.message);
+    console.error("Activity Fetch Error:", error.message);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
