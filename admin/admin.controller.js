@@ -32,16 +32,19 @@ export async function approveUserPayout(req, res) {
   try {
     const { wp_user_id, amount, conversion_id } = req.body;
 
-    // Your existing logic to update payout status here...
+    // 1. First, update your existing balance_logs or conversions
+    // [Your existing DB update code here]
 
-    // NOW call the accounting record inside this function
+    // 2. IMMEDIATELY register it in the Global Ledger
+    // This is what makes the Accounting data show up!
     await recordAccountingEntry({
-        type: 'USER_SETTLEMENT',
-        adminId: req.user.id, // Reference from auth middleware
+        type: 'USER_SETTLEMENT', // Layman: Money going out to user
+        adminId: req.user.id,    
         userId: wp_user_id,
         convId: conversion_id,
-        debit: amount, 
-        note: "Settlement approved via Admin Panel"
+        debit: amount,           // Subtracting from system
+        credit: 0,
+        note: `Payout approved for User ${wp_user_id}. Order ref: ${conversion_id}`
     });
 
     res.json({ success: true });
