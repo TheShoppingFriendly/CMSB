@@ -40,8 +40,8 @@ export const handlePostback = async (req, res) => {
     }
 
     // Fetch click record
-    const clickResult = await db.query(
-      "SELECT id FROM click_tracking WHERE clickid = $1 LIMIT 1",
+ const clickResult = await db.query(
+      "SELECT id, campaign_id, wp_user_id FROM click_tracking WHERE clickid = $1 LIMIT 1",
       [clickid]
     );
 
@@ -51,6 +51,8 @@ export const handlePostback = async (req, res) => {
     }
 
     const click_row_id = clickResult.rows[0].id;
+    const campaign_id = clickResult.rows[0].campaign_id; // Now defined!
+    const wp_user_id = clickResult.rows[0].wp_user_id;
 
     // ------------------------------------------
     // #1: De-dup by ORDER ID  
@@ -102,6 +104,15 @@ export const handlePostback = async (req, res) => {
       ]
     );
 
+
+    await recordAccountingEntry({
+        type: 'INCOMING_REVENUE',
+        storeId: campaign_id, 
+        userId: wp_user_id,
+        credit: commission, 
+        note: `Revenue: Postback for Order ${orderId || 'N/A'}`
+    });
+
     return res.status(200).send("OK");
   } catch (err) {
     console.error("ERROR handlePostback:", err);
@@ -110,9 +121,3 @@ export const handlePostback = async (req, res) => {
 };
 
 
-await recordAccountingEntry({
-    type: 'INCOMING_REVENUE',
-    storeId: campaign_id, 
-    credit: commission_amount, // The full amount the network paid you
-    note: `Postback received for Order ID: ${order_id}`
-});

@@ -22,15 +22,32 @@ export async function getConversions(req, res) {
     [Number(limit), Number(offset)]
   );
 
+  
+
   res.json(rows);
 }
 
 
-await recordAccountingEntry({
-    type: 'USER_SETTLEMENT',
-    adminId: req.admin.id, // Who approved it
-    userId: wp_user_id,
-    convId: conversion_id,
-    debit: amount, // Money owed to user
-    note: "Settlement approved via Admin Panel"
-});
+export async function approveUserPayout(req, res) {
+  try {
+    const { wp_user_id, amount, conversion_id } = req.body;
+
+    // Your existing logic to update payout status here...
+
+    // NOW call the accounting record inside this function
+    await recordAccountingEntry({
+        type: 'USER_SETTLEMENT',
+        adminId: req.user.id, // Reference from auth middleware
+        userId: wp_user_id,
+        convId: conversion_id,
+        debit: amount, 
+        note: "Settlement approved via Admin Panel"
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+
