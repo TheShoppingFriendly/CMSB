@@ -112,7 +112,7 @@ export const handlePostback = async (req, res) => {
 
 await recordAccountingEntry({
     type: 'INCOMING_REVENUE',
-    storeId: store_id, 
+    storeId: campaign_id, 
     credit: commission_amount, // The full amount the network paid you
     note: `Postback received for Order ID: ${order_id}`
 });
