@@ -1,5 +1,6 @@
 // controllers/postbackController.js
 import db from "../db.js";
+import { recordAccountingEntry } from "../modules/accounting/accounting.service.js";
 
 export const handlePostback = async (req, res) => {
   try {
@@ -107,3 +108,11 @@ export const handlePostback = async (req, res) => {
     return res.status(500).send("Server error");
   }
 };
+
+
+await recordAccountingEntry({
+    type: 'INCOMING_REVENUE',
+    storeId: store_id, 
+    credit: commission_amount, // The full amount the network paid you
+    note: `Postback received for Order ID: ${order_id}`
+});
