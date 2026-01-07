@@ -115,6 +115,7 @@ export const getAllUsers = async (req, res) => {
 };
 
 // 3. UPDATED: Manual Balance Update & Conversion Settlement (With Referral Logic)
+// 3. UPDATED: Manual Balance Update & Conversion Settlement
 export const updateUserBalance = async (req, res) => {
   const { wp_user_id, settlements, reason } = req.body; 
   const adminId = req.admin ? req.admin.id : null;
@@ -122,22 +123,38 @@ export const updateUserBalance = async (req, res) => {
   try {
     await db.query("BEGIN");
 
-    // 1. Snapshot Current Balance
-    const userRes = await db.query("SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", [wp_user_id]);
+    // 1. Snapshot Current Balance + Row Lock
+    const userRes = await db.query(
+        "SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", 
+        [wp_user_id]
+    );
+    
+    if (userRes.rows.length === 0) throw new Error("User not found in database.");
+    
     const prevBalance = parseFloat(userRes.rows[0].current_balance || 0);
 
-    // 2. Calculate Total from the Custom Amounts
-    const totalDelta = settlements.reduce((sum, item) => sum + parseFloat(item.amount), 0);
+    // 2. Calculate Total Delta (Safely handle numbers)
+    const totalDelta = settlements.reduce((sum, item) => {
+        const amt = parseFloat(item.amount);
+        return sum + (isNaN(amt) ? 0 : amt);
+    }, 0);
 
     // 3. Update User Balance & Total Earned
+    // We use COALESCE to prevent NULL and RETURNING to get the exact new balance
     const updateRes = await db.query(
-      `UPDATE users SET current_balance = current_balance + $1, total_earned = total_earned + $1
-       WHERE wp_user_id = $2 RETURNING current_balance`,
+      `UPDATE users 
+       SET current_balance = current_balance + $1, 
+           total_earned = total_earned + CASE WHEN $1 > 0 THEN $1 ELSE 0 END
+       WHERE wp_user_id = $2 
+       RETURNING current_balance`,
       [totalDelta, wp_user_id]
     );
+
+    if (updateRes.rows.length === 0) throw new Error("Failed to update user balance.");
+    
     const newBal = parseFloat(updateRes.rows[0].current_balance);
 
-    // 4. Log the Audit Trail
+    // 4. Log the Audit Trail (ENSURE newBal is not NULL)
     const logRes = await db.query(
       `INSERT INTO balance_logs (wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, admin_id)
        VALUES ($1, $2, $3, $4, 'settlement', $5, $6) RETURNING id`,
@@ -145,7 +162,7 @@ export const updateUserBalance = async (req, res) => {
     );
     const logId = logRes.rows[0].id;
 
-    // 5. Update conversions
+    // 5. Update each individual conversion
     for (const item of settlements) {
       const days = parseInt(item.lock_days) || 0;
       const releaseDate = new Date();
@@ -162,7 +179,7 @@ export const updateUserBalance = async (req, res) => {
       );
     }
 
-    // --- REFERRAL COMMISSION CALCULATION ---
+    // --- REFERRAL COMMISSION CALCULATION (USER 1 EARNINGS) ---
     if (totalDelta > 0) {
         const refRes = await db.query(
             "SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1 AND status != 'blocked'",
@@ -173,22 +190,19 @@ export const updateUserBalance = async (req, res) => {
             const referrerId = refRes.rows[0].referrer_wp_id;
             const commissionAmount = totalDelta * 0.10; // 10%
 
-            // Add to Referrer Wallet
             await db.query(
                 `UPDATE users SET current_balance = current_balance + $1, total_earned = total_earned + $1 WHERE wp_user_id = $2`,
                 [commissionAmount, referrerId]
             );
 
-            // Log for Referrer
             await db.query(
                 `INSERT INTO balance_logs (wp_user_id, amount_changed, action_type, reason, status)
                  VALUES ($1, $2, 'referral_earning', $3, 'active')`,
-                [referrerId, commissionAmount, `Referral commission from Friend #${wp_user_id}`]
+                [referrerId, commissionAmount, `Commission from Friend #${wp_user_id} activity`]
             );
 
-            // Update Referral Stats
             await db.query(
-                `UPDATE referrals SET total_earned_from_referee = total_earned_from_referee + $1, status = 'approved' 
+                `UPDATE referrals SET total_earned_from_referee = total_earned_from_referee + $1, status = 'approved'
                  WHERE referee_wp_id = $2`,
                 [commissionAmount, wp_user_id]
             );
@@ -199,6 +213,7 @@ export const updateUserBalance = async (req, res) => {
     res.json({ success: true, newBalance: newBal });
   } catch (error) {
     await db.query("ROLLBACK");
+    console.error("Settlement Error:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
@@ -210,49 +225,94 @@ export const revertSettlement = async (req, res) => {
     await db.query("BEGIN");
 
     // 1. Get the original log
-    const logRes = await db.query("SELECT * FROM balance_logs WHERE id = $1 AND status != 'reverted'", [log_id]);
-    if (logRes.rows.length === 0) throw new Error("Transaction not found or already reverted.");
+    const logRes = await db.query(
+        "SELECT * FROM balance_logs WHERE id = $1 AND status != 'reverted' FOR UPDATE", 
+        [log_id]
+    );
+    
+    if (logRes.rows.length === 0) {
+        throw new Error("Transaction not found or already reverted.");
+    }
     
     const { wp_user_id, amount_changed } = logRes.rows[0];
+    const amountToReverse = parseFloat(amount_changed);
 
-    // 2. Reverse User balance
-    await db.query(
-      `UPDATE users SET current_balance = current_balance - $1, total_earned = total_earned - $1 WHERE wp_user_id = $2`,
-      [amount_changed, wp_user_id]
+    // 2. Mathematically reverse User 2's balance
+    const updateUserRes = await db.query(
+      `UPDATE users 
+       SET current_balance = current_balance - $1, 
+           total_earned = total_earned - CASE WHEN $1 > 0 THEN $1 ELSE 0 END 
+       WHERE wp_user_id = $2
+       RETURNING current_balance`,
+      [amountToReverse, wp_user_id]
     );
 
-    // --- REVERSE REFERRAL COMMISSION ---
-    if (parseFloat(amount_changed) > 0) {
-        const refRes = await db.query("SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1", [wp_user_id]);
+    if (updateUserRes.rows.length === 0) throw new Error("User record not found for reversal.");
+
+    // --- NEW: REVERSE REFERRAL COMMISSION (USER 1) ---
+    if (amountToReverse > 0) {
+        // Find if this user has a referrer
+        const refRes = await db.query(
+            "SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1", 
+            [wp_user_id]
+        );
+        
         if (refRes.rows.length > 0) {
             const referrerId = refRes.rows[0].referrer_wp_id;
-            const refAmount = parseFloat(amount_changed) * 0.10;
+            const refAmountToTakeBack = amountToReverse * 0.10;
 
-            await db.query(
-                `UPDATE users SET current_balance = current_balance - $1, total_earned = total_earned - $1 WHERE wp_user_id = $2`,
-                [refAmount, referrerId]
+            // Snapshot Referrer's current state to calculate new_balance for logs
+            const refState = await db.query("SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", [referrerId]);
+            const refPrevBal = parseFloat(refState.rows[0].current_balance || 0);
+
+            // Subtract from User 1
+            const updateRefRes = await db.query(
+                `UPDATE users 
+                 SET current_balance = current_balance - $1, 
+                     total_earned = total_earned - $1 
+                 WHERE wp_user_id = $2
+                 RETURNING current_balance`,
+                [refAmountToTakeBack, referrerId]
             );
 
+            const refNewBal = parseFloat(updateRefRes.rows[0].current_balance);
+
+            // Log the reversal for User 1 (Prevents NULL in new_balance)
             await db.query(
-                `UPDATE referrals SET total_earned_from_referee = total_earned_from_referee - $1 WHERE referee_wp_id = $2`,
-                [refAmount, wp_user_id]
+                `INSERT INTO balance_logs (wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, status)
+                 VALUES ($1, $2, $3, $4, 'referral_reversal', $5, 'reverted')`,
+                [referrerId, -refAmountToTakeBack, refPrevBal, refNewBal, `Reversal of commission from Friend #${wp_user_id}`]
+            );
+
+            // Subtract from the referral table stats
+            await db.query(
+                `UPDATE referrals 
+                 SET total_earned_from_referee = total_earned_from_referee - $1 
+                 WHERE referee_wp_id = $2`,
+                [refAmountToTakeBack, wp_user_id]
             );
         }
     }
 
-    // 3. Reset linked conversions
+    // 3. Reset linked conversions back to pending
     await db.query(
-      `UPDATE conversions SET payout_status = 'pending', actual_paid_amount = NULL, log_id = NULL, release_date = NULL WHERE log_id = $1`,
+      `UPDATE conversions 
+       SET payout_status = 'pending', 
+           actual_paid_amount = NULL, 
+           log_id = NULL, 
+           release_date = NULL 
+       WHERE log_id = $1`,
       [log_id]
     );
 
-    // 4. Mark the log as reverted
+    // 4. Mark the original log as reverted
     await db.query("UPDATE balance_logs SET status = 'reverted' WHERE id = $1", [log_id]);
 
     await db.query("COMMIT");
-    res.json({ success: true, message: "Transaction reverted successfully." });
+    res.json({ success: true, message: "Transaction and linked referral commissions reverted successfully." });
   } catch (error) {
     await db.query("ROLLBACK");
+    console.error("Reversal Error:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
