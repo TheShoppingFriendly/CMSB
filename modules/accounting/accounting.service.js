@@ -1,3 +1,5 @@
+import db from "../../db";
+
 export const recordAccountingEntry = async ({
   type,
   adminId = null,
