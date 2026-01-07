@@ -1,27 +1,108 @@
 import db from "../../db.js";
 
 // 1. Sync Users from WordPress (UPSERT logic) - NO CHANGES
-export const syncUsers = async (req, res) => {
-  const { users } = req.body;
-  if (!Array.isArray(users)) {
-    return res.status(400).json({ error: "Invalid user data format" });
-  }
+// --- HELPERS ---
 
-  try {
-    for (const user of users) {
-      await db.query(
-        `INSERT INTO users (wp_user_id, email, name)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (wp_user_id) 
-         DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name`,
-        [user.wp_user_id, user.email, user.name]
-      );
+// Generates the TGBRXXXXX format
+const generateTGBRCode = () => {
+    const digits = Math.floor(10000 + Math.random() * 90000); 
+    return `TGBR${digits}`;
+};
+
+// Logic to link the Referee to the Referrer
+const linkReferral = async (refereeWpId, refCode, refereeIp) => {
+    try {
+        // 1. Find who owns the referral code (User 1)
+        const referrerRes = await db.query(
+            "SELECT wp_user_id, registration_ip FROM users WHERE referral_code = $1",
+            [refCode]
+        );
+
+        if (referrerRes.rows.length === 0) return; // Code doesn't exist
+
+        const referrer = referrerRes.rows[0];
+
+        // 2. Scam Prevention: Check if IPs match
+        const status = (referrer.registration_ip === refereeIp) ? 'flagged' : 'pending';
+
+        // 3. Insert into referrals table (ON CONFLICT prevents duplicate referrals)
+        await db.query(
+            `INSERT INTO referrals (referrer_wp_id, referee_wp_id, registration_ip, status)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (referee_wp_id) DO NOTHING`,
+            [referrer.wp_user_id, refereeWpId, refereeIp, status]
+        );
+    } catch (err) {
+        console.error("Linking Error:", err.message);
     }
-    res.json({ success: true, message: `Synced ${users.length} users` });
-  } catch (error) {
-    console.error("Sync Error:", error.message);
-    res.status(500).json({ error: "Database sync failed" });
-  }
+};
+
+// --- CONTROLLERS ---
+
+// 1. Sync Users from WordPress (NOW WITH REFERRAL LOGIC)
+export const syncUsers = async (req, res) => {
+    const { users } = req.body;
+    if (!Array.isArray(users)) {
+        return res.status(400).json({ error: "Invalid user data format" });
+    }
+
+    try {
+        for (const user of users) {
+            // Generate a code for the user if they don't have one (for User 3 or new users)
+            const newGeneratedCode = generateTGBRCode();
+
+            // UPSERT User: Save IP and generate TGBR code if missing
+            const result = await db.query(
+                `INSERT INTO users (wp_user_id, email, name, referral_code, registration_ip)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (wp_user_id) 
+                 DO UPDATE SET 
+                    email = EXCLUDED.email, 
+                    name = EXCLUDED.name,
+                    registration_ip = COALESCE(users.registration_ip, EXCLUDED.registration_ip),
+                    referral_code = COALESCE(users.referral_code, EXCLUDED.referral_code)
+                 RETURNING referral_code`,
+                [user.wp_user_id, user.email, user.name, newGeneratedCode, user.user_ip]
+            );
+
+            // If this user was referred by someone (User 2 logic)
+            if (user.ref_code) {
+                await linkReferral(user.wp_user_id, user.ref_code, user.user_ip);
+            }
+        }
+        res.json({ success: true, message: `Synced ${users.length} users and updated referrals.` });
+    } catch (error) {
+        console.error("Sync Error:", error.message);
+        res.status(500).json({ error: "Database sync failed" });
+    }
+};
+
+// 2. Get User Stats (NOW INCLUDES REFERRAL CODE FOR DASHBOARD)
+export const getUserStats = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await db.query(
+            "SELECT current_balance, total_earned, referral_code FROM users WHERE wp_user_id = $1",
+            [id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const user = result.rows[0];
+        res.json({
+            success: true,
+            balances: {
+                available: user.current_balance || 0,
+                pending: 0, // You can add logic for this later
+                locked: 0
+            },
+            referral_code: user.referral_code || "" // This goes back to WP Dashboard
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 };
 
 // 2. Fetch all users for Admin Dashboard - NO CHANGES
