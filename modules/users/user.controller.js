@@ -1,6 +1,5 @@
 import db from "../../db.js";
 
-// 1. Sync Users from WordPress (UPSERT logic) - NO CHANGES
 // --- HELPERS ---
 
 // Generates the TGBRXXXXX format
@@ -18,14 +17,14 @@ const linkReferral = async (refereeWpId, refCode, refereeIp) => {
             [refCode]
         );
 
-        if (referrerRes.rows.length === 0) return; // Code doesn't exist
+        if (referrerRes.rows.length === 0) return; 
 
         const referrer = referrerRes.rows[0];
 
         // 2. Scam Prevention: Check if IPs match
         const status = (referrer.registration_ip === refereeIp) ? 'flagged' : 'pending';
 
-        // 3. Insert into referrals table (ON CONFLICT prevents duplicate referrals)
+        // 3. Insert into referrals table
         await db.query(
             `INSERT INTO referrals (referrer_wp_id, referee_wp_id, registration_ip, status)
              VALUES ($1, $2, $3, $4)
@@ -39,7 +38,7 @@ const linkReferral = async (refereeWpId, refCode, refereeIp) => {
 
 // --- CONTROLLERS ---
 
-// 1. Sync Users from WordPress (NOW WITH REFERRAL LOGIC)
+// 1. Sync Users from WordPress
 export const syncUsers = async (req, res) => {
     const { users } = req.body;
     if (!Array.isArray(users)) {
@@ -48,11 +47,10 @@ export const syncUsers = async (req, res) => {
 
     try {
         for (const user of users) {
-            // Generate a code for the user if they don't have one (for User 3 or new users)
             const newGeneratedCode = generateTGBRCode();
 
-            // UPSERT User: Save IP and generate TGBR code if missing
-            const result = await db.query(
+            // UPSERT User
+            await db.query(
                 `INSERT INTO users (wp_user_id, email, name, referral_code, registration_ip)
                  VALUES ($1, $2, $3, $4, $5)
                  ON CONFLICT (wp_user_id) 
@@ -60,12 +58,10 @@ export const syncUsers = async (req, res) => {
                     email = EXCLUDED.email, 
                     name = EXCLUDED.name,
                     registration_ip = COALESCE(users.registration_ip, EXCLUDED.registration_ip),
-                    referral_code = COALESCE(users.referral_code, EXCLUDED.referral_code)
-                 RETURNING referral_code`,
+                    referral_code = COALESCE(users.referral_code, EXCLUDED.referral_code)`,
                 [user.wp_user_id, user.email, user.name, newGeneratedCode, user.user_ip]
             );
 
-            // If this user was referred by someone (User 2 logic)
             if (user.ref_code) {
                 await linkReferral(user.wp_user_id, user.ref_code, user.user_ip);
             }
@@ -77,12 +73,14 @@ export const syncUsers = async (req, res) => {
     }
 };
 
-// 2. Get User Stats (NOW INCLUDES REFERRAL CODE FOR DASHBOARD)
+// 2. Get User Stats (UPDATED with Referral Totals)
 export const getUserStats = async (req, res) => {
     const { id } = req.params;
     try {
         const result = await db.query(
-            "SELECT current_balance, total_earned, referral_code FROM users WHERE wp_user_id = $1",
+            `SELECT u.current_balance, u.total_earned, u.referral_code,
+             (SELECT COALESCE(SUM(total_earned_from_referee), 0) FROM referrals WHERE referrer_wp_id = u.wp_user_id) as total_ref_earnings
+             FROM users u WHERE u.wp_user_id = $1`,
             [id]
         );
 
@@ -95,17 +93,18 @@ export const getUserStats = async (req, res) => {
             success: true,
             balances: {
                 available: user.current_balance || 0,
-                pending: 0, // You can add logic for this later
-                locked: 0
+                pending: 0, 
+                locked: 0,
+                referral_total: user.total_ref_earnings || 0
             },
-            referral_code: user.referral_code || "" // This goes back to WP Dashboard
+            referral_code: user.referral_code || "" 
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 };
 
-// 2. Fetch all users for Admin Dashboard - NO CHANGES
+// 2. Fetch all users for Admin Dashboard
 export const getAllUsers = async (req, res) => {
   try {
     const result = await db.query(`SELECT * FROM users ORDER BY synced_at DESC`);
@@ -115,8 +114,7 @@ export const getAllUsers = async (req, res) => {
   }
 };
 
-// 3. UPDATED: Manual Balance Update & Conversion Settlement
-// Now handles custom amounts, lock days (release date), and Cashback
+// 3. UPDATED: Manual Balance Update & Conversion Settlement (With Referral Logic)
 export const updateUserBalance = async (req, res) => {
   const { wp_user_id, settlements, reason } = req.body; 
   const adminId = req.admin ? req.admin.id : null;
@@ -128,7 +126,7 @@ export const updateUserBalance = async (req, res) => {
     const userRes = await db.query("SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", [wp_user_id]);
     const prevBalance = parseFloat(userRes.rows[0].current_balance || 0);
 
-    // 2. Calculate Total from the Custom Amounts (supports negative for Cashback)
+    // 2. Calculate Total from the Custom Amounts
     const totalDelta = settlements.reduce((sum, item) => sum + parseFloat(item.amount), 0);
 
     // 3. Update User Balance & Total Earned
@@ -139,7 +137,7 @@ export const updateUserBalance = async (req, res) => {
     );
     const newBal = parseFloat(updateRes.rows[0].current_balance);
 
-    // 4. Log the Audit Trail (Status defaults to 'active')
+    // 4. Log the Audit Trail
     const logRes = await db.query(
       `INSERT INTO balance_logs (wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, admin_id)
        VALUES ($1, $2, $3, $4, 'settlement', $5, $6) RETURNING id`,
@@ -147,7 +145,7 @@ export const updateUserBalance = async (req, res) => {
     );
     const logId = logRes.rows[0].id;
 
-    // 5. Update each individual conversion with Actual Amount + Release Date
+    // 5. Update conversions
     for (const item of settlements) {
       const days = parseInt(item.lock_days) || 0;
       const releaseDate = new Date();
@@ -164,6 +162,39 @@ export const updateUserBalance = async (req, res) => {
       );
     }
 
+    // --- REFERRAL COMMISSION CALCULATION ---
+    if (totalDelta > 0) {
+        const refRes = await db.query(
+            "SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1 AND status != 'blocked'",
+            [wp_user_id]
+        );
+
+        if (refRes.rows.length > 0) {
+            const referrerId = refRes.rows[0].referrer_wp_id;
+            const commissionAmount = totalDelta * 0.10; // 10%
+
+            // Add to Referrer Wallet
+            await db.query(
+                `UPDATE users SET current_balance = current_balance + $1, total_earned = total_earned + $1 WHERE wp_user_id = $2`,
+                [commissionAmount, referrerId]
+            );
+
+            // Log for Referrer
+            await db.query(
+                `INSERT INTO balance_logs (wp_user_id, amount_changed, action_type, reason, status)
+                 VALUES ($1, $2, 'referral_earning', $3, 'active')`,
+                [referrerId, commissionAmount, `Referral commission from Friend #${wp_user_id}`]
+            );
+
+            // Update Referral Stats
+            await db.query(
+                `UPDATE referrals SET total_earned_from_referee = total_earned_from_referee + $1, status = 'approved' 
+                 WHERE referee_wp_id = $2`,
+                [commissionAmount, wp_user_id]
+            );
+        }
+    }
+
     await db.query("COMMIT");
     res.json({ success: true, newBalance: newBal });
   } catch (error) {
@@ -172,7 +203,7 @@ export const updateUserBalance = async (req, res) => {
   }
 };
 
-// 4. NEW: Revert Settlement (Handles reversing both Payments and Cashbacks)
+// 4. UPDATED: Revert Settlement (Handles reversing Referral Commissions)
 export const revertSettlement = async (req, res) => {
   const { log_id } = req.body;
   try {
@@ -184,23 +215,34 @@ export const revertSettlement = async (req, res) => {
     
     const { wp_user_id, amount_changed } = logRes.rows[0];
 
-    // 2. Mathematically reverse the balance change (Subtracting a negative adds it back)
+    // 2. Reverse User balance
     await db.query(
-      `UPDATE users 
-       SET current_balance = current_balance - $1, 
-           total_earned = total_earned - $1 
-       WHERE wp_user_id = $2`,
+      `UPDATE users SET current_balance = current_balance - $1, total_earned = total_earned - $1 WHERE wp_user_id = $2`,
       [amount_changed, wp_user_id]
     );
 
-    // 3. Reset linked conversions back to pending
+    // --- REVERSE REFERRAL COMMISSION ---
+    if (parseFloat(amount_changed) > 0) {
+        const refRes = await db.query("SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1", [wp_user_id]);
+        if (refRes.rows.length > 0) {
+            const referrerId = refRes.rows[0].referrer_wp_id;
+            const refAmount = parseFloat(amount_changed) * 0.10;
+
+            await db.query(
+                `UPDATE users SET current_balance = current_balance - $1, total_earned = total_earned - $1 WHERE wp_user_id = $2`,
+                [refAmount, referrerId]
+            );
+
+            await db.query(
+                `UPDATE referrals SET total_earned_from_referee = total_earned_from_referee - $1 WHERE referee_wp_id = $2`,
+                [refAmount, wp_user_id]
+            );
+        }
+    }
+
+    // 3. Reset linked conversions
     await db.query(
-      `UPDATE conversions 
-       SET payout_status = 'pending', 
-           actual_paid_amount = NULL, 
-           log_id = NULL, 
-           release_date = NULL 
-       WHERE log_id = $1`,
+      `UPDATE conversions SET payout_status = 'pending', actual_paid_amount = NULL, log_id = NULL, release_date = NULL WHERE log_id = $1`,
       [log_id]
     );
 
@@ -211,70 +253,35 @@ export const revertSettlement = async (req, res) => {
     res.json({ success: true, message: "Transaction reverted successfully." });
   } catch (error) {
     await db.query("ROLLBACK");
-    console.error("Reversal Error:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
 
-// 5. Fetch User Specific Activity - UPDATED to include new fields
+// 5. Fetch User Specific Activity
 export const getUserActivity = async (req, res) => {
   const { id } = req.params; 
-
   try {
     if (!id) return res.status(400).json({ error: "Missing user ID" });
 
-    // A. Clicks
     const clicks = await db.query(
-      `SELECT clickid, ip_address, created_at FROM click_tracking 
-       WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 50`,
+      `SELECT clickid, ip_address, created_at FROM click_tracking WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 50`,
       [id]
     ).catch(e => ({ rows: [] }));
 
-    // B. Conversions (Now includes release_date and actual_paid_amount)
     const conversions = await db.query(
-      `SELECT 
-        c.id, 
-        ct.clickid, 
-        ct.campaign_id, 
-        c.payout, 
-        c.actual_paid_amount,
-        c.commission, 
-        c.status, 
-        c.payout_status,
-        c.release_date,
-        c.created_at 
-       FROM conversions c
-       JOIN click_tracking ct ON c.click_id = ct.id
-       WHERE ct.wp_user_id = $1 
-       ORDER BY c.created_at DESC`,
+      `SELECT c.id, ct.clickid, ct.campaign_id, c.payout, c.actual_paid_amount, c.commission, c.status, c.payout_status, c.release_date, c.created_at 
+       FROM conversions c JOIN click_tracking ct ON c.click_id = ct.id WHERE ct.wp_user_id = $1 ORDER BY c.created_at DESC`,
       [id]
     ).catch(e => ({ rows: [] }));
 
-    // C. Balance Logs (Now includes id and status for reversal logic)
     const logs = await db.query(
-      `SELECT 
-        id,
-        amount_changed, 
-        previous_balance, 
-        new_balance, 
-        reason, 
-        status,
-        campaign_summary, 
-        created_at 
-       FROM balance_logs 
-       WHERE wp_user_id = $1 
-       ORDER BY created_at DESC`,
+      `SELECT id, amount_changed, previous_balance, new_balance, reason, status, campaign_summary, created_at 
+       FROM balance_logs WHERE wp_user_id = $1 ORDER BY created_at DESC`,
       [id]
     ).catch(e => ({ rows: [] }));
 
-    res.json({
-      clicks: clicks.rows,
-      conversions: conversions.rows,
-      logs: logs.rows
-    });
-
+    res.json({ clicks: clicks.rows, conversions: conversions.rows, logs: logs.rows });
   } catch (error) {
-    console.error("Activity Fetch Error:", error.message);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
