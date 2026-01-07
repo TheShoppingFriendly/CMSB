@@ -21,6 +21,7 @@ import storeRoutes from "./modules/stores/store.routes.js";
 import userRoutes from "./modules/users/user.routes.js";
 import publicRoutes from "./routes/public.routes.js";
 import accountingRoutes from "./routes/accountingRoutes.js";
+import referralRoutes from "./routes/referral.routes.js";
 
 const app = express();
 
@@ -64,6 +65,8 @@ app.use("/api/admin", adminDataRoutes);
 
 app.use("/api/public", publicRoutes);
 app.use("/api/admin/accounting", accountingRoutes);
+
+app.use("/api/referrals", referralRoutes);
 
 
 // Default Route
