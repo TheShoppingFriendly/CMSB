@@ -1,8 +1,8 @@
-const pool = require('../../db'); // your pg Pool
-const { syncWallet } = require('./wallet.sync');
-const TYPES = require('./transaction.types');
+import pool from "../../db.js";
+import { syncWallet } from "./wallet.sync.js";
+import TYPES from "./transaction.types.js";
 
-async function record({ 
+export async function finance({ 
   action,
   amount,
   wpUserId,
@@ -17,7 +17,7 @@ async function record({
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query("BEGIN");
 
     // Lock ledger
     const { rows } = await client.query(`
@@ -34,12 +34,12 @@ async function record({
     let debit = 0;
     let newProfit = currentProfit;
 
-    if (config.category === 'REVENUE') {
+    if (config.category === "REVENUE") {
       credit = amount;
       newProfit += amount;
     }
 
-    if (config.category === 'EXPENSE') {
+    if (config.category === "EXPENSE") {
       debit = amount;
       newProfit -= amount;
     }
@@ -67,14 +67,12 @@ async function record({
 
     await syncWallet(client, wpUserId, config.wallet);
 
-    await client.query('COMMIT');
+    await client.query("COMMIT");
     return res.rows[0];
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.query("ROLLBACK");
     throw err;
   } finally {
     client.release();
   }
 }
-
-module.exports = { record };

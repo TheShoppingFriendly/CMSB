@@ -1,5 +1,5 @@
 import db from "../db.js";
-import finance from "../modules/finance/finance.engine.js";
+import { finance } from "../modules/finance/finance.engine.js";
 
 export async function getOverview(req, res) {
   const profit = await db.query(`
@@ -161,4 +161,3 @@ export async function manualAdjustment(req, res) {
 
   res.json({ success: true });
 }
-    

@@ -1,6 +1,6 @@
 import db from "../db.js";
 import { recordAccountingEntry } from "../modules/accounting/accounting.service.js";
-import finance from "../modules/finance/finance.engine.js";
+import { finance } from "../modules/finance/finance.engine.js";
 
 export async function getClicks(req, res) {
   const { page = 1, limit = 50 } = req.query;

@@ -1,7 +1,7 @@
 // controllers/postbackController.js
 import db from "../db.js";
 import { recordAccountingEntry } from "../modules/accounting/accounting.service.js";
-import finance from "../modules/finance/finance.engine.js";
+import { finance } from "../modules/finance/finance.engine.js";
 
 
 export const handlePostback = async (req, res) => {
