@@ -1,5 +1,6 @@
 import db from "../db.js";
 import { recordAccountingEntry } from "../modules/accounting/accounting.service.js";
+import finance from "../modules/finance/finance.engine.js";
 
 export async function getClicks(req, res) {
   const { page = 1, limit = 50 } = req.query;
@@ -37,15 +38,15 @@ export async function approveUserPayout(req, res) {
 
     // 2. IMMEDIATELY register it in the Global Ledger
     // This is what makes the Accounting data show up!
-    await recordAccountingEntry({
-        type: 'USER_SETTLEMENT', // Layman: Money going out to user
-        adminId: req.user.id,    
-        userId: wp_user_id,
-        convId: conversion_id,
-        debit: amount,           // Subtracting from system
-        credit: 0,
-        note: `Payout approved for User ${wp_user_id}. Order ref: ${conversion_id}`
-    });
+ await finance.record({
+  action: 'PAYOUT_APPROVED',
+  amount,
+  wpUserId: wp_user_id,
+  adminId: req.user.id,
+  entityType: 'CONVERSION',
+  entityId: conversion_id,
+  note: `Admin approved payout`
+});
 
     res.json({ success: true });
   } catch (err) {

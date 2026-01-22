@@ -1,6 +1,8 @@
 // controllers/postbackController.js
 import db from "../db.js";
 import { recordAccountingEntry } from "../modules/accounting/accounting.service.js";
+import finance from "../modules/finance/finance.engine.js";
+
 
 export const handlePostback = async (req, res) => {
   try {
@@ -105,13 +107,16 @@ export const handlePostback = async (req, res) => {
     );
 
 
-    await recordAccountingEntry({
-        type: 'INCOMING_REVENUE',
-        storeId: campaign_id, 
-        userId: wp_user_id,
-        credit: commission, 
-        note: `Revenue: Postback for Order ${orderId || 'N/A'}`
-    });
+ await finance.record({
+  action: 'CONVERSION_RECORDED',
+  amount: commission,
+  wpUserId: wp_user_id,
+  storeId: campaign_id,
+  entityType: 'CONVERSION',
+  entityId: orderId,
+  note: `Postback commission for Order ${orderId || 'N/A'}`
+});
+
 
     return res.status(200).send("OK");
   } catch (err) {
