@@ -1,22 +1,25 @@
-async function syncWallet(client, wpUserId, bucket) {
-  if (!bucket) return;
+export async function syncWallet(client, wpUserId, bucket) {
+  if (!bucket || !wpUserId) return;
 
   let column;
   let category;
 
   switch (bucket) {
-    case 'affiliate':
-      column = 'affiliate_balance';
-      category = 'REVENUE';
+    case "affiliate":
+      column = "affiliate_balance";
+      category = "REVENUE";
       break;
-    case 'referral':
-      column = 'referral_balance';
-      category = 'REVENUE';
+
+    case "referral":
+      column = "referral_balance";
+      category = "REVENUE";
       break;
-    case 'reward':
-      column = 'reward_cash_balance';
-      category = 'INTERNAL';
+
+    case "reward":
+      column = "reward_cash_balance";
+      category = "INTERNAL";
       break;
+
     default:
       return;
   }
@@ -25,7 +28,7 @@ async function syncWallet(client, wpUserId, bucket) {
     SELECT COALESCE(SUM(credit - debit), 0) AS balance
     FROM global_finance_ledger
     WHERE wp_user_id = $1
-    AND finance_category = $2
+      AND finance_category = $2
   `, [wpUserId, category]);
 
   await client.query(`
@@ -35,5 +38,3 @@ async function syncWallet(client, wpUserId, bucket) {
     WHERE wp_user_id = $2
   `, [rows[0].balance, wpUserId]);
 }
-
-module.exports = { syncWallet };
