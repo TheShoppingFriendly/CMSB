@@ -3,33 +3,48 @@ import { finance } from "../modules/finance/finance.engine.js";
 
 export async function getOverview(req, res) {
   try {
-    const profitRes = await db.query(`
-      SELECT COALESCE(SUM(credit - debit), 0) AS profit
+    const profit = await db.query(`
+      SELECT
+        COALESCE(SUM(
+          COALESCE(NULLIF(credit, '')::numeric, 0) -
+          COALESCE(NULLIF(debit, '')::numeric, 0)
+        ), 0) AS profit
       FROM global_finance_ledger
     `);
 
-    const todayRes = await db.query(`
-      SELECT 
-        COUNT(*)::int AS tx_count, 
-        COALESCE(SUM(credit - debit), 0) AS total
+    const today = await db.query(`
+      SELECT
+        COUNT(*) AS tx_count,
+        COALESCE(SUM(
+          COALESCE(NULLIF(credit, '')::numeric, 0) -
+          COALESCE(NULLIF(debit, '')::numeric, 0)
+        ), 0) AS total
       FROM global_finance_ledger
       WHERE created_at::date = CURRENT_DATE
     `);
 
-    const systemProfit = Number(profitRes.rows[0]?.profit) || 0;
-    const todayCount = Number(todayRes.rows[0]?.tx_count) || 0;
-    const todayTotal = Number(todayRes.rows[0]?.total) || 0;
+    const breakdown = await db.query(`
+      SELECT
+        finance_category,
+        COUNT(*) as count,
+        COALESCE(SUM(
+          COALESCE(NULLIF(credit, '')::numeric, 0)
+        ),0) as credits,
+        COALESCE(SUM(
+          COALESCE(NULLIF(debit, '')::numeric, 0)
+        ),0) as debits
+      FROM global_finance_ledger
+      GROUP BY finance_category
+    `);
 
     res.json({
-      system_profit: systemProfit,
-      today: {
-        tx_count: todayCount,
-        total: todayTotal
-      }
+      system_profit: profit.rows[0].profit,
+      today: today.rows[0],
+      breakdown: breakdown.rows
     });
   } catch (err) {
     console.error("Finance overview error:", err);
-    res.status(500).json({ message: "Failed to load overview" });
+    res.status(500).json({ message: "Finance overview failed" });
   }
 }
 
@@ -37,73 +52,69 @@ export async function getOverview(req, res) {
 
 
 export async function getLedger(req, res) {
-  const {
-    user,
-    store,
-    type,
-    from,
-    to,
-    page = 1,
-    limit = 50
-  } = req.query;
+  const { limit = 20, offset = 0 } = req.query;
 
-  let filters = [];
-  let values = [];
-  let i = 1;
+  try {
+    const result = await db.query(`
+      SELECT
+        id,
+        created_at,
+        transaction_type,
+        finance_category,
+        credit,
+        debit,
+        note,
+        wp_user_id,
+        store_id,
+        entity_type,
+        entity_id
+      FROM global_finance_ledger
+      ORDER BY created_at DESC
+      LIMIT $1 OFFSET $2
+    `, [limit, offset]);
 
-  if (user) {
-    filters.push(`wp_user_id = $${i++}`);
-    values.push(user);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Ledger error:", err);
+    res.status(500).json({ message: "Failed to load ledger" });
   }
-  if (store) {
-    filters.push(`store_id = $${i++}`);
-    values.push(store);
-  }
-  if (type) {
-    filters.push(`transaction_type = $${i++}`);
-    values.push(type);
-  }
-  if (from) {
-    filters.push(`created_at >= $${i++}`);
-    values.push(from);
-  }
-  if (to) {
-    filters.push(`created_at <= $${i++}`);
-    values.push(to);
-  }
-
-  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
-  const offset = (page - 1) * limit;
-
-  const result = await db.query(
-    `
-    SELECT *
-    FROM global_finance_ledger
-    ${where}
-    ORDER BY created_at DESC
-    LIMIT $${i++} OFFSET $${i++}
-    `,
-    [...values, limit, offset]
-  );
-
-  res.json(result.rows);
 }
+
 
 export async function getJourney(req, res) {
   const { id } = req.params;
 
-  const result = await db.query(
-    `
-    SELECT *
-    FROM global_finance_ledger
-    WHERE journey_id = $1
-    ORDER BY created_at ASC
-    `,
-    [id]
-  );
+  try {
+    const result = await db.query(`
+      SELECT
+        id,
+        created_at,
+        transaction_type,
+        finance_category,
+        credit,
+        debit,
+        note,
+        wp_user_id,
+        store_id,
+        entity_type,
+        entity_id
+      FROM global_finance_ledger
+      WHERE
+        entity_id::text = $1
+        OR wp_user_id::text = $1
+      ORDER BY created_at ASC
+    `, [String(id)]);
 
-  res.json(result.rows);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Journey lookup failed:", err);
+    res.status(500).json({ 
+      message: "Journey lookup failed",
+      error: err.message 
+    });
+  }
 }
+
 
 export async function getWallet(req, res) {
   const { wpUserId } = req.params;
