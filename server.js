@@ -68,7 +68,7 @@ app.use("/api/admin/accounting", accountingRoutes);
 
 app.use("/api/referrals", referralRoutes);
 
-app.use("/api/amdin/finance", adminFinanceRoute)
+app.use("/api/admin/finance", adminFinanceRoute)
 
 
 // Default Route
