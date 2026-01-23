@@ -1,24 +1,36 @@
 import db from "../db.js";
 import { finance } from "../modules/finance/finance.engine.js";
 
-export async function getOverview(req, res) {
-  const profit = await db.query(`
-    SELECT COALESCE(SUM(credit - debit),0) AS profit
-    FROM global_finance_ledger
-  `);
+export const getOverview = async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COALESCE(
+          (
+            SELECT system_profit_snapshot
+            FROM global_finance_ledger
+            ORDER BY created_at DESC
+            LIMIT 1
+          ),
+          0
+        ) AS system_profit
+    `);
 
-  const today = await db.query(`
-    SELECT COUNT(*) AS tx_count, 
-           COALESCE(SUM(credit - debit),0) AS total
-    FROM global_finance_ledger
-    WHERE created_at::date = CURRENT_DATE
-  `);
+    const profit = Number(rows[0].system_profit) || 0;
 
-  res.json({
-    system_profit: profit.rows[0].profit,
-    today: today.rows[0]
-  });
-}
+    res.json({
+      system_profit: profit,
+      today: {
+        tx_count: 0,
+        total: 0
+      }
+    });
+  } catch (err) {
+    console.error("Overview error:", err);
+    res.status(500).json({ message: "Failed to load overview" });
+  }
+};
+
 
 export async function getLedger(req, res) {
   const {
