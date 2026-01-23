@@ -1,35 +1,39 @@
 import db from "../db.js";
 import { finance } from "../modules/finance/finance.engine.js";
 
-export const getOverview = async (req, res) => {
+export async function getOverview(req, res) {
   try {
-    const { rows } = await pool.query(`
-      SELECT
-        COALESCE(
-          (
-            SELECT system_profit_snapshot
-            FROM global_finance_ledger
-            ORDER BY created_at DESC
-            LIMIT 1
-          ),
-          0
-        ) AS system_profit
+    const profitRes = await db.query(`
+      SELECT COALESCE(SUM(credit - debit), 0) AS profit
+      FROM global_finance_ledger
     `);
 
-    const profit = Number(rows[0].system_profit) || 0;
+    const todayRes = await db.query(`
+      SELECT 
+        COUNT(*)::int AS tx_count, 
+        COALESCE(SUM(credit - debit), 0) AS total
+      FROM global_finance_ledger
+      WHERE created_at::date = CURRENT_DATE
+    `);
+
+    const systemProfit = Number(profitRes.rows[0]?.profit) || 0;
+    const todayCount = Number(todayRes.rows[0]?.tx_count) || 0;
+    const todayTotal = Number(todayRes.rows[0]?.total) || 0;
 
     res.json({
-      system_profit: profit,
+      system_profit: systemProfit,
       today: {
-        tx_count: 0,
-        total: 0
+        tx_count: todayCount,
+        total: todayTotal
       }
     });
   } catch (err) {
-    console.error("Overview error:", err);
+    console.error("Finance overview error:", err);
     res.status(500).json({ message: "Failed to load overview" });
   }
-};
+}
+
+
 
 
 export async function getLedger(req, res) {
