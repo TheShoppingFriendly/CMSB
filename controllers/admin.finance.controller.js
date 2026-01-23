@@ -3,14 +3,14 @@ import { finance } from "../modules/finance/finance.engine.js";
 
 export async function getOverview(req, res) {
   try {
-    // We use COALESCE(SUM(credit - debit), 0) because they are already numeric
-    const profit = await db.query(`
-      SELECT 
-        COALESCE(SUM(credit - debit), 0) AS profit
+    // 1. Total Profit (Sum of all time)
+    const profitResult = await db.query(`
+      SELECT COALESCE(SUM(credit - debit), 0) AS profit
       FROM global_finance_ledger
     `);
 
-    const today = await db.query(`
+    // 2. Today's Stats
+    const todayResult = await db.query(`
       SELECT 
         COUNT(*) AS tx_count,
         COALESCE(SUM(credit - debit), 0) AS total
@@ -18,12 +18,24 @@ export async function getOverview(req, res) {
       WHERE created_at::date = CURRENT_DATE
     `);
 
+    // 3. Category Breakdown (Required by your frontend modal)
+    const breakdownResult = await db.query(`
+      SELECT 
+        finance_category,
+        COUNT(*) as count,
+        COALESCE(SUM(credit), 0) as credits,
+        COALESCE(SUM(debit), 0) as debits
+      FROM global_finance_ledger
+      GROUP BY finance_category
+    `);
+
     res.json({
-      system_profit: Number(profit.rows[0].profit),
+      system_profit: parseFloat(profitResult.rows[0].profit),
       today: {
-        tx_count: Number(today.rows[0].tx_count),
-        total: Number(today.rows[0].total)
-      }
+        tx_count: parseInt(todayResult.rows[0].tx_count),
+        total: parseFloat(todayResult.rows[0].total)
+      },
+      breakdown: breakdownResult.rows // This fixes the frontend "null" issue
     });
   } catch (err) {
     console.error("Finance overview error:", err);
