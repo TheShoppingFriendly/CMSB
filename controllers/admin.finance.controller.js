@@ -3,46 +3,50 @@ import { finance } from "../modules/finance/finance.engine.js";
 
 export async function getOverview(req, res) {
   try {
-    // 1. Total Profit (Sum of all time)
-    const profitResult = await db.query(`
-      SELECT COALESCE(SUM(credit - debit), 0) AS profit
+    // Total Profit (All time)
+    const profitRes = await db.query(`
+      SELECT COALESCE(SUM(credit - debit), 0)::text AS profit 
       FROM global_finance_ledger
     `);
 
-    // 2. Today's Stats
-    const todayResult = await db.query(`
+    // Today's Stats
+    const todayRes = await db.query(`
       SELECT 
-        COUNT(*) AS tx_count,
-        COALESCE(SUM(credit - debit), 0) AS total
+        COUNT(*)::integer AS tx_count,
+        COALESCE(SUM(credit - debit), 0)::text AS total
       FROM global_finance_ledger
       WHERE created_at::date = CURRENT_DATE
     `);
 
-    // 3. Category Breakdown (Required by your frontend modal)
-    const breakdownResult = await db.query(`
+    // Category Breakdown
+    const breakdownRes = await db.query(`
       SELECT 
         finance_category,
-        COUNT(*) as count,
-        COALESCE(SUM(credit), 0) as credits,
-        COALESCE(SUM(debit), 0) as debits
+        COUNT(*)::integer as count,
+        COALESCE(SUM(credit), 0)::text as credits,
+        COALESCE(SUM(debit), 0)::text as debits
       FROM global_finance_ledger
       GROUP BY finance_category
     `);
 
     res.json({
-      system_profit: parseFloat(profitResult.rows[0].profit),
+      system_profit: parseFloat(profitRes.rows[0].profit || 0),
       today: {
-        tx_count: parseInt(todayResult.rows[0].tx_count),
-        total: parseFloat(todayResult.rows[0].total)
+        tx_count: todayRes.rows[0].tx_count,
+        total: parseFloat(todayRes.rows[0].total || 0)
       },
-      breakdown: breakdownResult.rows // This fixes the frontend "null" issue
+      breakdown: breakdownRes.rows.map(row => ({
+        finance_category: row.finance_category,
+        count: row.count,
+        credits: parseFloat(row.credits || 0),
+        debits: parseFloat(row.debits || 0)
+      }))
     });
   } catch (err) {
     console.error("Finance overview error:", err);
     res.status(500).json({ message: "Failed to load finance overview" });
   }
 }
-
 export async function getLedger(req, res) {
   const { limit = 20, offset = 0 } = req.query;
 
