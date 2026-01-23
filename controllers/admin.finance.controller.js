@@ -3,35 +3,26 @@ import { finance } from "../modules/finance/finance.engine.js";
 
 export async function getOverview(req, res) {
   try {
+    // We use COALESCE(SUM(credit - debit), 0) because they are already numeric
     const profit = await db.query(`
       SELECT 
-        COALESCE(
-          SUM(
-            COALESCE(NULLIF(credit, '')::numeric, 0) 
-          - COALESCE(NULLIF(debit, '')::numeric, 0)
-          ), 
-        0) AS profit
+        COALESCE(SUM(credit - debit), 0) AS profit
       FROM global_finance_ledger
     `);
 
     const today = await db.query(`
       SELECT 
         COUNT(*) AS tx_count,
-        COALESCE(
-          SUM(
-            COALESCE(NULLIF(credit, '')::numeric, 0)
-          - COALESCE(NULLIF(debit, '')::numeric, 0)
-          ),
-        0) AS total
+        COALESCE(SUM(credit - debit), 0) AS total
       FROM global_finance_ledger
       WHERE created_at::date = CURRENT_DATE
     `);
 
     res.json({
-      system_profit: profit.rows[0].profit,
+      system_profit: Number(profit.rows[0].profit),
       today: {
         tx_count: Number(today.rows[0].tx_count),
-        total: today.rows[0].total
+        total: Number(today.rows[0].total)
       }
     });
   } catch (err) {
@@ -39,7 +30,6 @@ export async function getOverview(req, res) {
     res.status(500).json({ message: "Failed to load finance overview" });
   }
 }
-
 
 export async function getLedger(req, res) {
   const { limit = 20, offset = 0 } = req.query;
@@ -76,36 +66,20 @@ export async function getJourney(req, res) {
 
   try {
     const result = await db.query(`
-      SELECT
-        id,
-        created_at,
-        transaction_type,
-        finance_category,
-        credit,
-        debit,
-        note,
-        wp_user_id,
-        store_id,
-        entity_type,
-        entity_id
+      SELECT *
       FROM global_finance_ledger
       WHERE
-        entity_id::text = $1
-        OR wp_user_id::text = $1
+        entity_id = $1
+        OR wp_user_id = CASE WHEN $1 ~ '^[0-9]+$' THEN $1::integer ELSE NULL END
       ORDER BY created_at ASC
     `, [String(id)]);
 
     res.json(result.rows);
   } catch (err) {
     console.error("Journey lookup failed:", err);
-    res.status(500).json({ 
-      message: "Journey lookup failed",
-      error: err.message 
-    });
+    res.status(500).json({ message: "Journey lookup failed" });
   }
 }
-
-
 export async function getWallet(req, res) {
   const { wpUserId } = req.params;
 
