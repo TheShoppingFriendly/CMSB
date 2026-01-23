@@ -1,24 +1,25 @@
 import express from "express";
 import * as controller from "../controllers/admin.finance.controller.js";
-import requireAdmin from "../middleware/requireAdmin.js";
+// import adminAuth from "../middleware/adminAuth.js";
+import { adminAuth } from "../middleware/adminAuth.js";
 
 const router = express.Router();
 
 // SYSTEM
-router.get("/overview", requireAdmin, controller.getOverview);
+router.get("/overview", adminAuth, controller.getOverview);
 
 // LEDGER
-router.get("/ledger", requireAdmin, controller.getLedger);
-router.get("/journey/:id", requireAdmin, controller.getJourney);
+router.get("/ledger", adminAuth, controller.getLedger);
+router.get("/journey/:id", adminAuth, controller.getJourney);
 
 // WALLETS
-router.get("/wallet/:wpUserId", requireAdmin, controller.getWallet);
+router.get("/wallet/:wpUserId", adminAuth, controller.getWallet);
 
 // PAYOUTS
-router.post("/payout/approve", requireAdmin, controller.approvePayout);
-router.post("/payout/send", requireAdmin, controller.markPayoutSent);
+router.post("/payout/approve", adminAuth, controller.approvePayout);
+router.post("/payout/send", adminAuth, controller.markPayoutSent);
 
 // ADMIN ACTIONS
-router.post("/manual-adjust", requireAdmin, controller.manualAdjustment);
+router.post("/manual-adjust", adminAuth, controller.manualAdjustment);
 
 export default router;
