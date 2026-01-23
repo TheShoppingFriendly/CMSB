@@ -3,14 +3,14 @@ import { finance } from "../modules/finance/finance.engine.js";
 
 export async function getOverview(req, res) {
   try {
-    // Total Profit (All time)
-    const profitRes = await db.query(`
+    // 1. Total System Profit
+    const profit = await db.query(`
       SELECT COALESCE(SUM(credit - debit), 0)::text AS profit 
       FROM global_finance_ledger
     `);
 
-    // Today's Stats
-    const todayRes = await db.query(`
+    // 2. Today's Stats (Note: This will be 0 if no transactions occurred TODAY)
+    const today = await db.query(`
       SELECT 
         COUNT(*)::integer AS tx_count,
         COALESCE(SUM(credit - debit), 0)::text AS total
@@ -18,8 +18,8 @@ export async function getOverview(req, res) {
       WHERE created_at::date = CURRENT_DATE
     `);
 
-    // Category Breakdown
-    const breakdownRes = await db.query(`
+    // 3. Category Breakdown (Required for the Modal)
+    const breakdown = await db.query(`
       SELECT 
         finance_category,
         COUNT(*)::integer as count,
@@ -30,12 +30,12 @@ export async function getOverview(req, res) {
     `);
 
     res.json({
-      system_profit: parseFloat(profitRes.rows[0].profit || 0),
+      system_profit: parseFloat(profit.rows[0].profit || 0),
       today: {
-        tx_count: todayRes.rows[0].tx_count,
-        total: parseFloat(todayRes.rows[0].total || 0)
+        tx_count: today.rows[0].tx_count,
+        total: parseFloat(today.rows[0].total || 0)
       },
-      breakdown: breakdownRes.rows.map(row => ({
+      breakdown: breakdown.rows.map(row => ({
         finance_category: row.finance_category,
         count: row.count,
         credits: parseFloat(row.credits || 0),
@@ -47,6 +47,8 @@ export async function getOverview(req, res) {
     res.status(500).json({ message: "Failed to load finance overview" });
   }
 }
+
+
 export async function getLedger(req, res) {
   const { limit = 20, offset = 0 } = req.query;
 
