@@ -4,51 +4,41 @@ import { finance } from "../modules/finance/finance.engine.js";
 export async function getOverview(req, res) {
   try {
     const profit = await db.query(`
-      SELECT
-        COALESCE(SUM(
-          COALESCE(NULLIF(credit, '')::numeric, 0) -
-          COALESCE(NULLIF(debit, '')::numeric, 0)
-        ), 0) AS profit
+      SELECT 
+        COALESCE(
+          SUM(
+            COALESCE(NULLIF(credit, '')::numeric, 0) 
+          - COALESCE(NULLIF(debit, '')::numeric, 0)
+          ), 
+        0) AS profit
       FROM global_finance_ledger
     `);
 
     const today = await db.query(`
-      SELECT
+      SELECT 
         COUNT(*) AS tx_count,
-        COALESCE(SUM(
-          COALESCE(NULLIF(credit, '')::numeric, 0) -
-          COALESCE(NULLIF(debit, '')::numeric, 0)
-        ), 0) AS total
+        COALESCE(
+          SUM(
+            COALESCE(NULLIF(credit, '')::numeric, 0)
+          - COALESCE(NULLIF(debit, '')::numeric, 0)
+          ),
+        0) AS total
       FROM global_finance_ledger
       WHERE created_at::date = CURRENT_DATE
     `);
 
-    const breakdown = await db.query(`
-      SELECT
-        finance_category,
-        COUNT(*) as count,
-        COALESCE(SUM(
-          COALESCE(NULLIF(credit, '')::numeric, 0)
-        ),0) as credits,
-        COALESCE(SUM(
-          COALESCE(NULLIF(debit, '')::numeric, 0)
-        ),0) as debits
-      FROM global_finance_ledger
-      GROUP BY finance_category
-    `);
-
     res.json({
       system_profit: profit.rows[0].profit,
-      today: today.rows[0],
-      breakdown: breakdown.rows
+      today: {
+        tx_count: Number(today.rows[0].tx_count),
+        total: today.rows[0].total
+      }
     });
   } catch (err) {
     console.error("Finance overview error:", err);
-    res.status(500).json({ message: "Finance overview failed" });
+    res.status(500).json({ message: "Failed to load finance overview" });
   }
 }
-
-
 
 
 export async function getLedger(req, res) {
