@@ -16,6 +16,7 @@ const linkReferral = async (refereeWpId, refCode, refereeIp) => {
             "SELECT wp_user_id, registration_ip FROM users WHERE referral_code = $1",
             [refCode]
         );
+        
 
         if (referrerRes.rows.length === 0) return; 
 
