@@ -54,10 +54,11 @@ export async function getClicks(req, res) {
 
     res.json(rows);
   } catch (err) {
-    console.error("ERROR getClicks:", err);
-    res.status(500).json({ error: "Server error" });
+    console.error("Error fetching clicks:", err);
+    res.status(500).json({ message: "Server error" });
   }
 }
+
 
 
 export async function getConversions(req, res) {
