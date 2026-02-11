@@ -47,10 +47,10 @@ export const generateClickIdAndTrack = async (req, res) => {
     // -----------------------------
     // GET REFERRER
     // -----------------------------
-    const referrer =
-      req.headers["referer"] ||
-      req.headers["referrer"] ||
-      null;
+  const referrer =
+  req.body.referrer ||          // if manually sent from frontend
+  req.headers["referer"] ||     // browser header (correct spelling)
+  null;
 
     // -----------------------------
     // GET GEO LOCATION
