@@ -75,24 +75,10 @@ export const getClickByClickId = async (req, res) => {
         if (!clickid)
             return res.status(400).json({ success: false, message: "clickid required" });
 
-        // const { rows } = await db.query(
-        //     "SELECT * FROM click_tracking WHERE clickid = $1 LIMIT 1",
-        //     [clickid]
-        // );
         const { rows } = await db.query(
-    `
-    SELECT 
-        ct.*,
-        s.name AS store_name,
-        (s.name || ' (' || s.id || ')') AS store_display
-    FROM click_tracking ct
-    LEFT JOIN stores s ON ct.campaign_id = s.id
-    WHERE ct.clickid = $1
-    LIMIT 1
-    `,
-    [clickid]
-);
-
+            "SELECT * FROM click_tracking WHERE clickid = $1 LIMIT 1",
+            [clickid]
+        );
 
         if (!rows.length)
             return res.status(404).json({ success: false, message: "Not found" });
