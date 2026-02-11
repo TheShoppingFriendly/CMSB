@@ -26,9 +26,20 @@ router.get("/clicks", adminAuth, async (req, res) => {
 
 
 router.get("/conversions", adminAuth, async (req, res) => {
-  const { rows } = await db.query(
-    "SELECT * FROM conversions ORDER BY created_at DESC LIMIT 100"
-  );
+  const { rows } = await db.query(`
+    SELECT 
+      c.*,
+      ct.referrer,
+      ct.city,
+      ct.country,
+      ct.user_agent
+    FROM conversions c
+    LEFT JOIN click_tracking ct 
+      ON c.click_id = ct.id
+    ORDER BY c.created_at DESC
+    LIMIT 100
+  `);
+
   res.json(rows);
 });
 
