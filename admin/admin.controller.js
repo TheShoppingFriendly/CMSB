@@ -2,63 +2,17 @@ import db from "../db.js";
 import { recordAccountingEntry } from "../modules/accounting/accounting.service.js";
 import { finance } from "../modules/finance/finance.engine.js";
 
-// export async function getClicks(req, res) {
-//   const { page = 1, limit = 50 } = req.query;
-//   const offset = (page - 1) * limit;
-
-//   const [rows] = await db.query(
-//     "SELECT * FROM click_tracking ORDER BY created_at DESC LIMIT ? OFFSET ?",
-//     [Number(limit), Number(offset)]
-//   );
-
-//   res.json(rows);
-// }
-
-// 2nd working
-// export async function getClicks(req, res) {
-//   const { page = 1, limit = 50 } = req.query;
-//   const offset = (page - 1) * limit;
-
-// const { rows } = await db.query(`
-//   SELECT 
-//     ct.*,
-//     s.name AS store_name,
-//     (s.name || ' (' || s.id || ')') AS store_display
-//   FROM click_tracking ct
-//   LEFT JOIN stores s ON ct.campaign_id = s.id
-//   ORDER BY ct.created_at DESC
-//   LIMIT $1 OFFSET $2
-// `, [Number(limit), Number(offset)]);
-
-
-//   res.json(rows);
-// }
 export async function getClicks(req, res) {
-  try {
-    const { page = 1, limit = 50 } = req.query;
-    const offset = (page - 1) * limit;
+  const { page = 1, limit = 50 } = req.query;
+  const offset = (page - 1) * limit;
 
-    const { rows } = await db.query(
-      `
-      SELECT 
-        ct.*,
-        s.name AS store_name,
-        (s.name || ' (' || s.id || ')') AS store_display
-      FROM click_tracking ct
-      LEFT JOIN stores s ON ct.campaign_id = s.id
-      ORDER BY ct.created_at DESC
-      LIMIT $1 OFFSET $2
-      `,
-      [Number(limit), Number(offset)]
-    );
+  const [rows] = await db.query(
+    "SELECT * FROM click_tracking ORDER BY created_at DESC LIMIT ? OFFSET ?",
+    [Number(limit), Number(offset)]
+  );
 
-    res.json(rows);
-  } catch (err) {
-    console.error("Error fetching clicks:", err);
-    res.status(500).json({ message: "Server error" });
-  }
+  res.json(rows);
 }
-
 
 
 export async function getConversions(req, res) {

@@ -1,5 +1,7 @@
 import db from "../db.js";
 import { generateClickId } from "../utils/clickid.js";
+import geoip from "geoip-lite";
+
 
 // ------------------------
 // CREATE CLICK + clickid
@@ -29,28 +31,61 @@ export const generateClickIdAndTrack = async (req, res) => {
         
         // Removed the old conditional logic that appended clickid only for 'affiliate' type.
 
-        const ip_address =
-            (req.headers["x-forwarded-for"] || "").split(",").shift().trim() ||
-            req.socket.remoteAddress ||
-            null;
-        const user_agent = req.headers["user-agent"] || null;
+   // -----------------------------
+    // GET IP
+    // -----------------------------
+    const ip_address =
+      (req.headers["x-forwarded-for"] || "").split(",").shift().trim() ||
+      req.socket.remoteAddress ||
+      null;
+
+    // -----------------------------
+    // GET USER AGENT
+    // -----------------------------
+    const user_agent = req.headers["user-agent"] || null;
+
+    // -----------------------------
+    // GET REFERRER
+    // -----------------------------
+    const referrer =
+      req.headers["referer"] ||
+      req.headers["referrer"] ||
+      null;
+
+    // -----------------------------
+    // GET GEO LOCATION
+    // -----------------------------
+    let country = null;
+    let city = null;
+
+    if (ip_address) {
+      const geo = geoip.lookup(ip_address);
+      if (geo) {
+        country = geo.country || null;
+        city = geo.city || null;
+      }
+    }
 
         const sql = `
             INSERT INTO click_tracking
-             (wp_user_id, campaign_id, clickid, coupon_url, final_redirect_url, ip_address, user_agent, tracking_type)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id
+      (wp_user_id, campaign_id, clickid, coupon_url, final_redirect_url,
+       ip_address, user_agent, tracking_type, country, city, referrer)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      RETURNING id
         `;
 
         const { rows } = await db.query(sql, [
-            wpUserId,
-            campaignId,
-            clickid,
-            coupon_url,
-            final_url, // final_url in DB is the base URL
-            ip_address,
-            user_agent,
-            safeTrackingType,
+           wpUserId,
+      campaignId,
+      clickid,
+      coupon_url,
+      final_url,
+      ip_address,
+      user_agent,
+      safeTrackingType,
+      country,
+      city,
+      referrer
         ]);
 
         return res.status(201).json({
