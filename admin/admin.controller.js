@@ -20,14 +20,15 @@ export async function getClicks(req, res) {
 
   const [rows] = await db.query(
     `
-    SELECT 
-      ct.*,
-      s.name AS store_name,
-      CONCAT(s.name, ' (', s.id, ')') AS store_display
-    FROM click_tracking ct
-    LEFT JOIN stores s ON ct.campaign_id = s.id
-    ORDER BY ct.created_at DESC
-    LIMIT ? OFFSET ?
+SELECT 
+  ct.*,
+  s.name AS store_name,
+  CONCAT(s.name, ' (', s.id, ')') AS store_display
+FROM click_tracking ct
+LEFT JOIN stores s ON ct.campaign_id = s.id
+ORDER BY ct.created_at DESC
+LIMIT ? OFFSET ?
+
     `,
     [Number(limit), Number(offset)]
   );
