@@ -278,43 +278,32 @@ export const revertSettlement = async (req, res) => {
 
 // 5. Fetch User Specific Activity
 export const getUserActivity = async (req, res) => {
-  const { id } = req.params; 
+  const { id } = req.params;
   try {
-    if (!id) return res.status(400).json({ error: "Missing user ID" });
-
-    // Fetch live wallet balances from user_wallets
     const wallet = await db.query(
-      `SELECT affiliate_balance, referral_balance, reward_cash_balance, 
-              affiliate_pending, referral_pending 
-       FROM user_wallets WHERE wp_user_id = $1`,
-      [id]
+      `SELECT affiliate_balance, referral_balance, reward_cash_balance 
+       FROM user_wallets WHERE wp_user_id = $1`, [id]
     );
 
-    // Fetch categorized ledger data from global_finance_ledger
-    const ledger = await db.query(
+    const logs = await db.query(
       `SELECT 
-        created_at, finance_category, transaction_type, 
-        credit, debit, note, id as ledger_id
-       FROM global_finance_ledger 
+        created_at, 
+        amount_changed, 
+        new_balance, 
+        wallet_type, 
+        action_category, 
+        reason, 
+        status
+       FROM balance_logs 
        WHERE wp_user_id = $1 
-       ORDER BY created_at DESC`,
-      [id]
-    );
-
-    const conversions = await db.query(
-      `SELECT c.id, ct.campaign_id, c.payout, c.commission, c.payout_status, c.created_at 
-       FROM conversions c 
-       JOIN click_tracking ct ON c.click_id = ct.id 
-       WHERE ct.wp_user_id = $1 ORDER BY c.created_at DESC`,
-      [id]
+       ORDER BY created_at DESC`, [id]
     );
 
     res.json({ 
       wallet: wallet.rows[0] || {}, 
-      ledger: ledger.rows, 
-      conversions: conversions.rows 
+      ledger: logs.rows 
     });
   } catch (error) {
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: "Database error" });
   }
 };
