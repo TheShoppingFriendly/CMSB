@@ -29,7 +29,7 @@ router.get("/conversions", adminAuth, async (req, res) => {
   const { rows } = await db.query(`
     SELECT 
       c.*,
-      ct.referrer,
+      ct.referrer,  
       ct.city,
       ct.country,
       ct.user_agent

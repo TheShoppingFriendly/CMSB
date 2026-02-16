@@ -320,25 +320,47 @@ export const getUserActivity = async (req, res) => {
   try {
     if (!id) return res.status(400).json({ error: "Missing user ID" });
 
-    const clicks = await db.query(
-      `SELECT clickid, ip_address, created_at FROM click_tracking WHERE wp_user_id = $1 ORDER BY created_at DESC LIMIT 50`,
+    // 1. Fetch live wallet balances
+    const wallet = await db.query(
+      `SELECT affiliate_balance, referral_balance, reward_cash_balance, 
+              affiliate_pending, referral_pending 
+       FROM user_wallets WHERE wp_user_id = $1`,
       [id]
-    ).catch(e => ({ rows: [] }));
+    );
 
+    // 2. Fetch the new Finance Ledger (Matches your SQL schema)
+    const ledger = await db.query(
+      `SELECT 
+        created_at, 
+        finance_category, 
+        transaction_type, 
+        credit, 
+        debit, 
+        note,
+        entity_type,
+        id as ledger_id
+       FROM global_finance_ledger 
+       WHERE wp_user_id = $1 
+       ORDER BY created_at DESC`,
+      [id]
+    );
+
+    // 3. Standard conversions for the settlement section
     const conversions = await db.query(
-      `SELECT c.id, ct.clickid, ct.campaign_id, c.payout, c.actual_paid_amount, c.commission, c.status, c.payout_status, c.release_date, c.created_at 
-       FROM conversions c JOIN click_tracking ct ON c.click_id = ct.id WHERE ct.wp_user_id = $1 ORDER BY c.created_at DESC`,
+      `SELECT c.id, ct.campaign_id, c.payout, c.commission, c.payout_status, c.created_at 
+       FROM conversions c 
+       JOIN click_tracking ct ON c.click_id = ct.id 
+       WHERE ct.wp_user_id = $1 ORDER BY c.created_at DESC`,
       [id]
-    ).catch(e => ({ rows: [] }));
+    );
 
-    const logs = await db.query(
-      `SELECT id, amount_changed, previous_balance, new_balance, reason, status, campaign_summary, created_at 
-       FROM balance_logs WHERE wp_user_id = $1 ORDER BY created_at DESC`,
-      [id]
-    ).catch(e => ({ rows: [] }));
-
-    res.json({ clicks: clicks.rows, conversions: conversions.rows, logs: logs.rows });
+    res.json({ 
+      wallet: wallet.rows[0] || {}, 
+      ledger: ledger.rows, 
+      conversions: conversions.rows 
+    });
   } catch (error) {
+    console.error("Ledger Fetch Error:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
