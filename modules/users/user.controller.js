@@ -320,7 +320,7 @@ export const getUserActivity = async (req, res) => {
   try {
     if (!id) return res.status(400).json({ error: "Missing user ID" });
 
-    // 1. Fetch live wallet balances
+    // Fetch live wallet balances from user_wallets
     const wallet = await db.query(
       `SELECT affiliate_balance, referral_balance, reward_cash_balance, 
               affiliate_pending, referral_pending 
@@ -328,24 +328,17 @@ export const getUserActivity = async (req, res) => {
       [id]
     );
 
-    // 2. Fetch the new Finance Ledger (Matches your SQL schema)
+    // Fetch categorized ledger data from global_finance_ledger
     const ledger = await db.query(
       `SELECT 
-        created_at, 
-        finance_category, 
-        transaction_type, 
-        credit, 
-        debit, 
-        note,
-        entity_type,
-        id as ledger_id
+        created_at, finance_category, transaction_type, 
+        credit, debit, note, id as ledger_id
        FROM global_finance_ledger 
        WHERE wp_user_id = $1 
        ORDER BY created_at DESC`,
       [id]
     );
 
-    // 3. Standard conversions for the settlement section
     const conversions = await db.query(
       `SELECT c.id, ct.campaign_id, c.payout, c.commission, c.payout_status, c.created_at 
        FROM conversions c 
@@ -360,7 +353,6 @@ export const getUserActivity = async (req, res) => {
       conversions: conversions.rows 
     });
   } catch (error) {
-    console.error("Ledger Fetch Error:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
