@@ -118,99 +118,61 @@ export const getAllUsers = async (req, res) => {
 // 3. UPDATED: Manual Balance Update & Conversion Settlement (With Referral Logic)
 // 3. UPDATED: Manual Balance Update & Conversion Settlement
 export const updateUserBalance = async (req, res) => {
-  const { wp_user_id, settlements, reason } = req.body; 
+  const { wp_user_id, settlements, reason, finance_category } = req.body; 
   const adminId = req.admin ? req.admin.id : null;
 
   try {
     await db.query("BEGIN");
 
-    // 1. Snapshot User 2 (The one getting the cashback/settlement)
+    // 1. Snapshot and Update User 
     const userRes = await db.query(
-        "SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", 
+        "SELECT affiliate_balance, reward_cash_balance, referral_balance FROM user_wallets WHERE wp_user_id = $1 FOR UPDATE", 
         [wp_user_id]
     );
-    if (userRes.rows.length === 0) throw new Error("User not found.");
+    if (userRes.rows.length === 0) throw new Error("User wallet not found.");
     
-    const prevBalance = parseFloat(userRes.rows[0].current_balance || 0);
     const totalDelta = settlements.reduce((sum, item) => sum + parseFloat(item.amount), 0);
+    const category = finance_category || 'direct_affiliate';
 
-    // 2. Update User 2
-    const updateRes = await db.query(
-      `UPDATE users 
-       SET current_balance = current_balance + $1, 
-           total_earned = total_earned + CASE WHEN $1 > 0 THEN $1 ELSE 0 END
-       WHERE wp_user_id = $2 
-       RETURNING current_balance`,
+    // Update the specific wallet column based on category
+    const walletColumn = category === 'reward' ? 'reward_cash_balance' : 
+                         category === 'referral' ? 'referral_balance' : 'affiliate_balance';
+
+    await db.query(
+      `UPDATE user_wallets SET ${walletColumn} = ${walletColumn} + $1, total_lifetime_earned = total_lifetime_earned + $1 WHERE wp_user_id = $2`,
       [totalDelta, wp_user_id]
     );
-    const newBal = parseFloat(updateRes.rows[0].current_balance);
 
-    // 3. Log for User 2 (Explicitly providing all NOT NULL columns)
-    const logRes = await db.query(
-      `INSERT INTO balance_logs (wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, admin_id, status)
-       VALUES ($1, $2, $3, $4, 'settlement', $5, $6, 'active') RETURNING id`,
-      [wp_user_id, totalDelta, prevBalance, newBal, reason, adminId]
+    // 2. Log into GLOBAL_FINANCE_LEDGER (The missing part)
+    await db.query(
+      `INSERT INTO global_finance_ledger (
+        transaction_type, admin_id, wp_user_id, credit, note, finance_category, entity_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      ['settlement', adminId, wp_user_id, totalDelta, reason, category, 'manual_adjustment']
     );
-    const logId = logRes.rows[0].id;
-
-    // 4. Update conversions
-    for (const item of settlements) {
-      const days = parseInt(item.lock_days) || 0;
-      const releaseDate = new Date();
-      releaseDate.setDate(releaseDate.getDate() + days);
-
-      await db.query(
-        `UPDATE conversions SET payout_status = 'approved', actual_paid_amount = $1, log_id = $2, release_date = $3 WHERE id = $4`,
-        [item.amount, logId, releaseDate, item.id]
-      );
-    }
 
     // --- REFERRAL COMMISSION LOGIC ---
-    if (totalDelta > 0) {
-        const refRes = await db.query(
-            "SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1 AND status != 'blocked'",
-            [wp_user_id]
-        );
-
+    if (totalDelta > 0 && category === 'direct_affiliate') {
+        const refRes = await db.query("SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1", [wp_user_id]);
         if (refRes.rows.length > 0) {
             const referrerId = refRes.rows[0].referrer_wp_id;
-            const commissionAmount = totalDelta * 0.10;
+            const commission = totalDelta * 0.10;
 
-            // CRITICAL FIX: Fetch Referrer's current balance FIRST for the log
-            const refState = await db.query("SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", [referrerId]);
-            if (refState.rows.length > 0) {
-                const refPrevBal = parseFloat(refState.rows[0].current_balance || 0);
-
-                // Update Referrer
-                const updateRefRes = await db.query(
-                    `UPDATE users SET current_balance = current_balance + $1, total_earned = total_earned + $1 
-                     WHERE wp_user_id = $2 RETURNING current_balance`,
-                    [commissionAmount, referrerId]
-                );
-                const refNewBal = parseFloat(updateRefRes.rows[0].current_balance);
-
-                // Log for Referrer - ADDED missing previous_balance and new_balance
-                await db.query(
-                    `INSERT INTO balance_logs (wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, status)
-                     VALUES ($1, $2, $3, $4, 'referral_earning', $5, 'active')`,
-                    [referrerId, commissionAmount, refPrevBal, refNewBal, `Commission from Friend #${wp_user_id}`]
-                );
-
-                // Update Referral Table
-                await db.query(
-                    `UPDATE referrals SET total_earned_from_referee = total_earned_from_referee + $1, status = 'approved'
-                     WHERE referee_wp_id = $2`,
-                    [commissionAmount, wp_user_id]
-                );
-            }
+            await db.query(`UPDATE user_wallets SET referral_balance = referral_balance + $1 WHERE wp_user_id = $2`, [commission, referrerId]);
+            
+            // Log for Referrer in Global Ledger
+            await db.query(
+                `INSERT INTO global_finance_ledger (transaction_type, wp_user_id, credit, note, finance_category)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                ['referral_earning', referrerId, commission, `Commission from user ${wp_user_id}`, 'referral']
+            );
         }
     }
 
     await db.query("COMMIT");
-    res.json({ success: true, newBalance: newBal });
+    res.json({ success: true });
   } catch (error) {
     await db.query("ROLLBACK");
-    console.error("Settlement Error:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
