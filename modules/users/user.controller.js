@@ -277,33 +277,45 @@ export const revertSettlement = async (req, res) => {
 };
 
 // 5. Fetch User Specific Activity
-// userController.js - Activity Endpoint
-exports.getUserActivity = async (req, res) => {
-    const { wp_user_id } = req.params;
+// user.controller.js
 
-    try {
-        // 1. Fetch the user's current wallet balance
-        const wallet = await db.query('SELECT affiliate_balance, reward_cash_balance FROM wallets WHERE wp_user_id = ?', [wp_user_id]);
+const getUserActivity = async (req, res) => {
+  const { wp_user_id } = req.params;
+  try {
+    // 1. Fetch Wallet
+    const [wallet] = await db.execute(
+      `SELECT affiliate_balance, reward_cash_balance FROM wallets WHERE wp_user_id = ?`, 
+      [wp_user_id]
+    );
 
-        // 2. Fetch history (Already working in your logs)
-        const ledger = await db.query('SELECT * FROM ledger WHERE wp_user_id = ? ORDER BY created_at DESC', [wp_user_id]);
+    // 2. Fetch Ledger (This is what you currently see)
+    const [ledger] = await db.execute(
+      `SELECT * FROM wallet_logs WHERE wp_user_id = ? ORDER BY created_at DESC`, 
+      [wp_user_id]
+    );
 
-        // 3. FETCH PENDING CONVERSIONS (The Missing Part)
-        // Adjust the query to match your table names (e.g., 'conversions' or 'payouts')
-        const conversions = await db.query(
-            'SELECT id, campaign_id, payout, payout_status, created_at FROM conversions WHERE wp_user_id = ? AND payout_status = "pending"', 
-            [wp_user_id]
-        );
+    // 3. Fetch Conversions (THIS FIXES THE EMPTY TABLE)
+    // IMPORTANT: Ensure your table name is correct (e.g., 'conversions' or 'affiliate_stats')
+    const [conversions] = await db.execute(
+      `SELECT id, campaign_id, payout, status as payout_status, created_at 
+       FROM conversions 
+       WHERE wp_user_id = ? AND status = 'pending'`, 
+      [wp_user_id]
+    );
 
-        // 4. Return EVERYTHING in one object
-        res.status(200).json({
-            wallet: wallet[0] || {},
-            ledger: ledger || [],
-            conversions: conversions || [] // This makes the top table appear!
-        });
+    res.json({
+      wallet: wallet[0] || { affiliate_balance: 0, reward_cash_balance: 0 },
+      ledger: ledger || [],
+      conversions: conversions || []
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
 
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Error fetching user activity" });
-    }
+// CRITICAL: Ensure this is exported
+module.exports = {
+  // ... your other existing functions (e.g., getAllUsers, updateUser),
+  getUserActivity, 
 };
