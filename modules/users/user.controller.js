@@ -124,43 +124,62 @@ export const updateUserBalance = async (req, res) => {
   try {
     await db.query("BEGIN");
 
-    // 1. Snapshot and Update User 
+    // 1. Lock Wallet
     const userRes = await db.query(
-        "SELECT affiliate_balance, reward_cash_balance, referral_balance FROM user_wallets WHERE wp_user_id = $1 FOR UPDATE", 
+        "SELECT affiliate_balance FROM user_wallets WHERE wp_user_id = $1 FOR UPDATE", 
         [wp_user_id]
     );
     if (userRes.rows.length === 0) throw new Error("User wallet not found.");
     
     const totalDelta = settlements.reduce((sum, item) => sum + parseFloat(item.amount), 0);
     const category = finance_category || 'direct_affiliate';
-
-    // Update the specific wallet column based on category
     const walletColumn = category === 'reward' ? 'reward_cash_balance' : 
                          category === 'referral' ? 'referral_balance' : 'affiliate_balance';
 
+    // 2. Create the Balance Log first to get an ID
+    const logRes = await db.query(
+      `INSERT INTO balance_logs (wp_user_id, amount_changed, wallet_type, reason, action_type, status)
+       VALUES ($1, $2, $3, $4, 'settlement', 'active') RETURNING id`,
+      [wp_user_id, totalDelta, category === 'reward' ? 'reward' : 'affiliate', reason]
+    );
+    const logId = logRes.rows[0].id;
+
+    // 3. Update the Wallet
     await db.query(
       `UPDATE user_wallets SET ${walletColumn} = ${walletColumn} + $1, total_lifetime_earned = total_lifetime_earned + $1 WHERE wp_user_id = $2`,
       [totalDelta, wp_user_id]
     );
 
-    // 2. Log into GLOBAL_FINANCE_LEDGER (The missing part)
+    // 4. Update Conversions (Link them to the settlement and mark as paid)
+    if (settlements && settlements.length > 0) {
+      for (let item of settlements) {
+        if (item.id !== 'manual') { // Don't try to update DB if it's a manual adjustment
+            await db.query(
+                `UPDATE conversions 
+                 SET payout_status = 'paid', 
+                     actual_paid_amount = $1, 
+                     log_id = $2 
+                 WHERE id = $3`, 
+                [item.amount, logId, item.id]
+            );
+        }
+      }
+    }
+
+    // 5. Global Ledger Log
     await db.query(
-      `INSERT INTO global_finance_ledger (
-        transaction_type, admin_id, wp_user_id, credit, note, finance_category, entity_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO global_finance_ledger (transaction_type, admin_id, wp_user_id, credit, note, finance_category, entity_type) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       ['settlement', adminId, wp_user_id, totalDelta, reason, category, 'manual_adjustment']
     );
 
-    // --- REFERRAL COMMISSION LOGIC ---
+    // 6. Referral Commission (10%)
     if (totalDelta > 0 && category === 'direct_affiliate') {
         const refRes = await db.query("SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1", [wp_user_id]);
         if (refRes.rows.length > 0) {
             const referrerId = refRes.rows[0].referrer_wp_id;
             const commission = totalDelta * 0.10;
-
             await db.query(`UPDATE user_wallets SET referral_balance = referral_balance + $1 WHERE wp_user_id = $2`, [commission, referrerId]);
-            
-            // Log for Referrer in Global Ledger
             await db.query(
                 `INSERT INTO global_finance_ledger (transaction_type, wp_user_id, credit, note, finance_category)
                  VALUES ($1, $2, $3, $4, $5)`,
@@ -173,6 +192,7 @@ export const updateUserBalance = async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     await db.query("ROLLBACK");
+    console.error("Settlement Error:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
@@ -278,45 +298,35 @@ export const revertSettlement = async (req, res) => {
 
 // 5. Fetch User Specific Activity
 export const getUserActivity = async (req, res) => {
-  // Use 'wp_user_id' if that's what your router uses, 
-  // or 'id' if you are using 'req.params.id'
   const { wp_user_id } = req.params; 
   const userId = wp_user_id || req.params.id;
 
   try {
-    // 1. Fetch Wallet (Exact table name from your snippet)
+    // 1. Fetch Wallet
     const wallet = await db.query(
       `SELECT affiliate_balance, referral_balance, reward_cash_balance 
        FROM user_wallets WHERE wp_user_id = $1`, [userId]
     );
 
-    // 2. Fetch Logs (Exact table name from your snippet)
+    // 2. Fetch Logs
     const logs = await db.query(
-      `SELECT 
-        created_at, 
-        amount_changed, 
-        new_balance, 
-        wallet_type, 
-        action_category, 
-        reason, 
-        status
+      `SELECT created_at, amount_changed, new_balance, wallet_type, action_category, reason, status
        FROM balance_logs 
        WHERE wp_user_id = $1 
        ORDER BY created_at DESC`, [userId]
     );
 
-    // 3. Fetch Pending Conversions
-    // IMPORTANT: If this fails, it means your table is NOT named 'conversions'
-    // I am wrapping this in a try/catch so it doesn't break the whole page if it fails.
+    // 3. Fetch Pending Conversions (FIXED COLUMN NAME)
     let conversions = { rows: [] };
     try {
       conversions = await db.query(
-        `SELECT id, campaign_id, payout, status as payout_status, created_at 
+        `SELECT id, click_id as campaign_id, payout, payout_status, created_at 
          FROM conversions 
-         WHERE wp_user_id = $1 AND status = 'pending'`, [userId]
+         WHERE wp_user_id = $1 AND payout_status = 'pending'
+         ORDER BY created_at DESC`, [userId]
       );
     } catch (e) {
-      console.log("Conversions table not found or different columns, returning empty.");
+      console.log("Conversions query issue:", e.message);
     }
 
     res.json({ 
@@ -326,7 +336,7 @@ export const getUserActivity = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Full Error:", error); // Check your terminal to see the exact SQL error
-    res.status(500).json({ error: "Database error", details: error.message });
+    console.error("Activity Error:", error);
+    res.status(500).json({ error: "Database error" });
   }
 };
