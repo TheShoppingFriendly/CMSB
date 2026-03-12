@@ -278,18 +278,20 @@ export const revertSettlement = async (req, res) => {
 
 // 5. Fetch User Specific Activity
 export const getUserActivity = async (req, res) => {
-  // Use 'id' to match your route parameter
-  const { id } = req.params; 
+  // Use 'wp_user_id' if that's what your router uses, 
+  // or 'id' if you are using 'req.params.id'
+  const { wp_user_id } = req.params; 
+  const userId = wp_user_id || req.params.id;
 
   try {
-    // 1. Fetch Wallet
-    const walletResult = await db.query(
+    // 1. Fetch Wallet (Exact table name from your snippet)
+    const wallet = await db.query(
       `SELECT affiliate_balance, referral_balance, reward_cash_balance 
-       FROM user_wallets WHERE wp_user_id = $1`, [id]
+       FROM user_wallets WHERE wp_user_id = $1`, [userId]
     );
 
-    // 2. Fetch Ledger (Audit history)
-    const logsResult = await db.query(
+    // 2. Fetch Logs (Exact table name from your snippet)
+    const logs = await db.query(
       `SELECT 
         created_at, 
         amount_changed, 
@@ -300,30 +302,31 @@ export const getUserActivity = async (req, res) => {
         status
        FROM balance_logs 
        WHERE wp_user_id = $1 
-       ORDER BY created_at DESC`, [id]
+       ORDER BY created_at DESC`, [userId]
     );
 
-    // 3. Fetch Pending Conversions (This was the missing piece)
-    const conversionsResult = await db.query(
-      `SELECT 
-        id, 
-        campaign_id, 
-        payout, 
-        status as payout_status, 
-        created_at 
-       FROM conversions 
-       WHERE wp_user_id = $1 AND status = 'pending'`, [id]
-    );
+    // 3. Fetch Pending Conversions
+    // IMPORTANT: If this fails, it means your table is NOT named 'conversions'
+    // I am wrapping this in a try/catch so it doesn't break the whole page if it fails.
+    let conversions = { rows: [] };
+    try {
+      conversions = await db.query(
+        `SELECT id, campaign_id, payout, status as payout_status, created_at 
+         FROM conversions 
+         WHERE wp_user_id = $1 AND status = 'pending'`, [userId]
+      );
+    } catch (e) {
+      console.log("Conversions table not found or different columns, returning empty.");
+    }
 
-    // IMPORTANT: The keys below MUST match your Frontend state mapping
     res.json({ 
-      wallet: walletResult.rows[0] || {}, 
-      ledger: logsResult.rows || [],       // Frontend calls this 'ledger'
-      conversions: conversionsResult.rows || [] 
+      wallet: wallet.rows[0] || {}, 
+      ledger: logs.rows || [],
+      conversions: conversions.rows || []
     });
 
   } catch (error) {
-    console.error("Activity Fetch Error:", error);
-    res.status(500).json({ error: "Database error" });
+    console.error("Full Error:", error); // Check your terminal to see the exact SQL error
+    res.status(500).json({ error: "Database error", details: error.message });
   }
 };
