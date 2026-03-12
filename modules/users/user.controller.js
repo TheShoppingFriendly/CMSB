@@ -278,16 +278,18 @@ export const revertSettlement = async (req, res) => {
 
 // 5. Fetch User Specific Activity
 export const getUserActivity = async (req, res) => {
-  const { id } = req.params; // wp_user_id from the URL
+  // Use 'id' to match your route parameter
+  const { id } = req.params; 
+
   try {
-    // 1. Fetch Wallet (Existing)
-    const wallet = await db.query(
+    // 1. Fetch Wallet
+    const walletResult = await db.query(
       `SELECT affiliate_balance, referral_balance, reward_cash_balance 
        FROM user_wallets WHERE wp_user_id = $1`, [id]
     );
 
-    // 2. Fetch Logs (Existing - Bottom Table)
-    const logs = await db.query(
+    // 2. Fetch Ledger (Audit history)
+    const logsResult = await db.query(
       `SELECT 
         created_at, 
         amount_changed, 
@@ -301,9 +303,8 @@ export const getUserActivity = async (req, res) => {
        ORDER BY created_at DESC`, [id]
     );
 
-    // 3. FETCH PENDING CONVERSIONS (New - Top Table)
-    // NOTE: Ensure your table name is 'conversions' and column is 'payout'
-    const conversions = await db.query(
+    // 3. Fetch Pending Conversions (This was the missing piece)
+    const conversionsResult = await db.query(
       `SELECT 
         id, 
         campaign_id, 
@@ -314,11 +315,11 @@ export const getUserActivity = async (req, res) => {
        WHERE wp_user_id = $1 AND status = 'pending'`, [id]
     );
 
-    // 4. Send combined response
+    // IMPORTANT: The keys below MUST match your Frontend state mapping
     res.json({ 
-      wallet: wallet.rows[0] || {}, 
-      ledger: logs.rows || [],
-      conversions: conversions.rows || [] // This populates the "Pending Conversions" table
+      wallet: walletResult.rows[0] || {}, 
+      ledger: logsResult.rows || [],       // Frontend calls this 'ledger'
+      conversions: conversionsResult.rows || [] 
     });
 
   } catch (error) {
