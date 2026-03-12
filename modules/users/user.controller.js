@@ -279,43 +279,38 @@ export const revertSettlement = async (req, res) => {
 // 5. Fetch User Specific Activity
 // user.controller.js
 
-const getUserActivity = async (req, res) => {
+export const getUserActivity = async (req, res) => {
   const { wp_user_id } = req.params;
+
   try {
-    // 1. Fetch Wallet
+    // 1. Fetch Wallet Balance
     const [wallet] = await db.execute(
-      `SELECT affiliate_balance, reward_cash_balance FROM wallets WHERE wp_user_id = ?`, 
+      `SELECT affiliate_balance, reward_cash_balance FROM wallets WHERE wp_user_id = ?`,
       [wp_user_id]
     );
 
-    // 2. Fetch Ledger (This is what you currently see)
+    // 2. Fetch Ledger (The history you already see)
     const [ledger] = await db.execute(
-      `SELECT * FROM wallet_logs WHERE wp_user_id = ? ORDER BY created_at DESC`, 
+      `SELECT * FROM wallet_logs WHERE wp_user_id = ? ORDER BY created_at DESC`,
       [wp_user_id]
     );
 
-    // 3. Fetch Conversions (THIS FIXES THE EMPTY TABLE)
-    // IMPORTANT: Ensure your table name is correct (e.g., 'conversions' or 'affiliate_stats')
+    // 3. FETCH CONVERSIONS (The fix for the empty "Pending" table)
+    // Adjust 'conversions' and 'status' to match your actual database table/column names
     const [conversions] = await db.execute(
       `SELECT id, campaign_id, payout, status as payout_status, created_at 
        FROM conversions 
-       WHERE wp_user_id = ? AND status = 'pending'`, 
+       WHERE wp_user_id = ? AND status = 'pending'`,
       [wp_user_id]
     );
 
     res.json({
       wallet: wallet[0] || { affiliate_balance: 0, reward_cash_balance: 0 },
       ledger: ledger || [],
-      conversions: conversions || []
+      conversions: conversions || [] // This sends the data the frontend is looking for
     });
   } catch (err) {
-    console.error(err);
+    console.error("Controller Error:", err);
     res.status(500).json({ error: "Internal Server Error" });
   }
-};
-
-// CRITICAL: Ensure this is exported
-module.exports = {
-  // ... your other existing functions (e.g., getAllUsers, updateUser),
-  getUserActivity, 
 };
