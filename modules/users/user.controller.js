@@ -277,42 +277,33 @@ export const revertSettlement = async (req, res) => {
 };
 
 // 5. Fetch User Specific Activity
-// 5. Fetch User Specific Activity (RESTORED MANAGEMENT VIEW)
 export const getUserActivity = async (req, res) => {
-  const { wp_user_id } = req.params; 
-  const userId = wp_user_id || req.params.id;
-
+  const { id } = req.params;
   try {
     const wallet = await db.query(
       `SELECT affiliate_balance, referral_balance, reward_cash_balance 
-       FROM user_wallets WHERE wp_user_id = $1`, [userId]
+       FROM user_wallets WHERE wp_user_id = $1`, [id]
     );
 
     const logs = await db.query(
-      `SELECT created_at, amount_changed, new_balance, wallet_type, action_category, reason, status
+      `SELECT 
+        created_at, 
+        amount_changed, 
+        new_balance, 
+        wallet_type, 
+        action_category, 
+        reason, 
+        status
        FROM balance_logs 
        WHERE wp_user_id = $1 
-       ORDER BY created_at DESC`, [userId]
-    );
-
-    // FETCH BOTH PENDING AND PAID CONVERSIONS
-    // This ensures the table is populated like your previous working version
-    const conversions = await db.query(
-      `SELECT id, click_id as campaign_id, payout, payout_status, created_at 
-       FROM conversions 
-       WHERE wp_user_id = $1 
-       AND payout_status IN ('pending', 'paid')
-       ORDER BY created_at DESC LIMIT 50`, [userId]
+       ORDER BY created_at DESC`, [id]
     );
 
     res.json({ 
       wallet: wallet.rows[0] || {}, 
-      ledger: logs.rows || [],
-      conversions: conversions.rows || []
+      ledger: logs.rows 
     });
-
   } catch (error) {
-    console.error("Activity Error:", error);
     res.status(500).json({ error: "Database error" });
   }
 };
