@@ -277,40 +277,52 @@ export const revertSettlement = async (req, res) => {
 };
 
 // 5. Fetch User Specific Activity
-// user.controller.js
-
 export const getUserActivity = async (req, res) => {
-  const { wp_user_id } = req.params;
-
+  const { id } = req.params; // wp_user_id from the URL
   try {
-    // 1. Fetch Wallet Balance
-    const [wallet] = await db.execute(
-      `SELECT affiliate_balance, reward_cash_balance FROM wallets WHERE wp_user_id = ?`,
-      [wp_user_id]
+    // 1. Fetch Wallet (Existing)
+    const wallet = await db.query(
+      `SELECT affiliate_balance, referral_balance, reward_cash_balance 
+       FROM user_wallets WHERE wp_user_id = $1`, [id]
     );
 
-    // 2. Fetch Ledger (The history you already see)
-    const [ledger] = await db.execute(
-      `SELECT * FROM wallet_logs WHERE wp_user_id = ? ORDER BY created_at DESC`,
-      [wp_user_id]
+    // 2. Fetch Logs (Existing - Bottom Table)
+    const logs = await db.query(
+      `SELECT 
+        created_at, 
+        amount_changed, 
+        new_balance, 
+        wallet_type, 
+        action_category, 
+        reason, 
+        status
+       FROM balance_logs 
+       WHERE wp_user_id = $1 
+       ORDER BY created_at DESC`, [id]
     );
 
-    // 3. FETCH CONVERSIONS (The fix for the empty "Pending" table)
-    // Adjust 'conversions' and 'status' to match your actual database table/column names
-    const [conversions] = await db.execute(
-      `SELECT id, campaign_id, payout, status as payout_status, created_at 
+    // 3. FETCH PENDING CONVERSIONS (New - Top Table)
+    // NOTE: Ensure your table name is 'conversions' and column is 'payout'
+    const conversions = await db.query(
+      `SELECT 
+        id, 
+        campaign_id, 
+        payout, 
+        status as payout_status, 
+        created_at 
        FROM conversions 
-       WHERE wp_user_id = ? AND status = 'pending'`,
-      [wp_user_id]
+       WHERE wp_user_id = $1 AND status = 'pending'`, [id]
     );
 
-    res.json({
-      wallet: wallet[0] || { affiliate_balance: 0, reward_cash_balance: 0 },
-      ledger: ledger || [],
-      conversions: conversions || [] // This sends the data the frontend is looking for
+    // 4. Send combined response
+    res.json({ 
+      wallet: wallet.rows[0] || {}, 
+      ledger: logs.rows || [],
+      conversions: conversions.rows || [] // This populates the "Pending Conversions" table
     });
-  } catch (err) {
-    console.error("Controller Error:", err);
-    res.status(500).json({ error: "Internal Server Error" });
+
+  } catch (error) {
+    console.error("Activity Fetch Error:", error);
+    res.status(500).json({ error: "Database error" });
   }
 };
