@@ -277,33 +277,33 @@ export const revertSettlement = async (req, res) => {
 };
 
 // 5. Fetch User Specific Activity
-export const getUserActivity = async (req, res) => {
-  const { id } = req.params;
-  try {
-    const wallet = await db.query(
-      `SELECT affiliate_balance, referral_balance, reward_cash_balance 
-       FROM user_wallets WHERE wp_user_id = $1`, [id]
-    );
+// userController.js - Activity Endpoint
+exports.getUserActivity = async (req, res) => {
+    const { wp_user_id } = req.params;
 
-    const logs = await db.query(
-      `SELECT 
-        created_at, 
-        amount_changed, 
-        new_balance, 
-        wallet_type, 
-        action_category, 
-        reason, 
-        status
-       FROM balance_logs 
-       WHERE wp_user_id = $1 
-       ORDER BY created_at DESC`, [id]
-    );
+    try {
+        // 1. Fetch the user's current wallet balance
+        const wallet = await db.query('SELECT affiliate_balance, reward_cash_balance FROM wallets WHERE wp_user_id = ?', [wp_user_id]);
 
-    res.json({ 
-      wallet: wallet.rows[0] || {}, 
-      ledger: logs.rows 
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Database error" });
-  }
+        // 2. Fetch history (Already working in your logs)
+        const ledger = await db.query('SELECT * FROM ledger WHERE wp_user_id = ? ORDER BY created_at DESC', [wp_user_id]);
+
+        // 3. FETCH PENDING CONVERSIONS (The Missing Part)
+        // Adjust the query to match your table names (e.g., 'conversions' or 'payouts')
+        const conversions = await db.query(
+            'SELECT id, campaign_id, payout, payout_status, created_at FROM conversions WHERE wp_user_id = ? AND payout_status = "pending"', 
+            [wp_user_id]
+        );
+
+        // 4. Return EVERYTHING in one object
+        res.status(200).json({
+            wallet: wallet[0] || {},
+            ledger: ledger || [],
+            conversions: conversions || [] // This makes the top table appear!
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error fetching user activity" });
+    }
 };
