@@ -299,51 +299,66 @@ export const getUserActivity = async (req, res) => {
   const { id } = req.params;
 
   try {
+    if (!id) {
+      return res.status(400).json({ error: "Missing user ID" });
+    }
 
-    const wallet = await db.query(
-      `SELECT affiliate_balance, referral_balance, reward_cash_balance
-       FROM user_wallets 
-       WHERE wp_user_id = $1`,
+    // Fetch recent clicks
+    const clicks = await db.query(
+      `SELECT clickid, ip_address, created_at 
+       FROM click_tracking 
+       WHERE wp_user_id = $1 
+       ORDER BY created_at DESC 
+       LIMIT 50`,
       [id]
     );
 
-    const logs = await db.query(
-      `SELECT 
-        created_at,
-        amount_changed,
-        new_balance,
-        wallet_type,
-        action_category,
-        reason,
-        status
-       FROM balance_logs
-       WHERE wp_user_id = $1
-       ORDER BY created_at DESC`,
-      [id]
-    );
-
-    // ✅ NEW: fetch conversions
+    // Fetch conversions linked through click_tracking
     const conversions = await db.query(
       `SELECT 
+        c.id,
+        ct.clickid,
+        ct.campaign_id,
+        c.payout,
+        c.actual_paid_amount,
+        c.commission,
+        c.status,
+        c.payout_status,
+        c.release_date,
+        c.created_at
+       FROM conversions c
+       JOIN click_tracking ct 
+       ON c.click_id = ct.id
+       WHERE ct.wp_user_id = $1
+       ORDER BY c.created_at DESC`,
+      [id]
+    );
+
+    // Fetch ledger logs
+    const logs = await db.query(
+      `SELECT 
         id,
-        campaign_id,
-        payout,
-        payout_status,
+        amount_changed,
+        previous_balance,
+        new_balance,
+        reason,
+        status,
+        campaign_summary,
         created_at
-       FROM conversions
-       WHERE wp_user_id = $1
+       FROM balance_logs 
+       WHERE wp_user_id = $1 
        ORDER BY created_at DESC`,
       [id]
     );
 
     res.json({
-      wallet: wallet.rows[0] || {},
-      ledger: logs.rows,
-      conversions: conversions.rows   // 👈 IMPORTANT
+      clicks: clicks.rows || [],
+      conversions: conversions.rows || [],
+      logs: logs.rows || []
     });
 
   } catch (error) {
-    console.error("User Activity Error:", error.message);
-    res.status(500).json({ error: "Database error" });
+    console.error("getUserActivity Error:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 };
