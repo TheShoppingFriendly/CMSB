@@ -115,7 +115,7 @@ export const getAllUsers = async (req, res) => {
   }
 };
 
-// 3. UPDATED: Manual Balance Update & Conversion Settlement (With Referral Logic)
+
 // 3. UPDATED: Manual Balance Update & Conversion Settlement
 export const updateUserBalance = async (req, res) => {
   const { wp_user_id, settlements, reason, finance_category } = req.body; 
@@ -168,6 +168,22 @@ export const updateUserBalance = async (req, res) => {
             );
         }
     }
+
+    // 3. Mark conversions as paid
+const conversionIds = settlements.map(s => s.id);
+
+if (conversionIds.length > 0) {
+
+  await db.query(
+    `UPDATE conversions
+     SET payout_status = 'paid',
+         actual_paid_amount = payout,
+         paid_at = NOW()
+     WHERE id = ANY($1::int[])`,
+    [conversionIds]
+  );
+
+}
 
     await db.query("COMMIT");
     res.json({ success: true });
@@ -279,31 +295,53 @@ export const revertSettlement = async (req, res) => {
 // 5. Fetch User Specific Activity
 export const getUserActivity = async (req, res) => {
   const { id } = req.params;
+
   try {
+
     const wallet = await db.query(
-      `SELECT affiliate_balance, referral_balance, reward_cash_balance 
-       FROM user_wallets WHERE wp_user_id = $1`, [id]
+      `SELECT affiliate_balance, referral_balance, reward_cash_balance
+       FROM user_wallets 
+       WHERE wp_user_id = $1`,
+      [id]
     );
 
     const logs = await db.query(
       `SELECT 
-        created_at, 
-        amount_changed, 
-        new_balance, 
-        wallet_type, 
-        action_category, 
-        reason, 
+        created_at,
+        amount_changed,
+        new_balance,
+        wallet_type,
+        action_category,
+        reason,
         status
-       FROM balance_logs 
-       WHERE wp_user_id = $1 
-       ORDER BY created_at DESC`, [id]
+       FROM balance_logs
+       WHERE wp_user_id = $1
+       ORDER BY created_at DESC`,
+      [id]
     );
 
-    res.json({ 
-      wallet: wallet.rows[0] || {}, 
-      ledger: logs.rows 
+    // ✅ NEW: fetch conversions
+    const conversions = await db.query(
+      `SELECT 
+        id,
+        campaign_id,
+        payout,
+        payout_status,
+        created_at
+       FROM conversions
+       WHERE wp_user_id = $1
+       ORDER BY created_at DESC`,
+      [id]
+    );
+
+    res.json({
+      wallet: wallet.rows[0] || {},
+      ledger: logs.rows,
+      conversions: conversions.rows   // 👈 IMPORTANT
     });
+
   } catch (error) {
+    console.error("User Activity Error:", error.message);
     res.status(500).json({ error: "Database error" });
   }
 };
