@@ -173,15 +173,34 @@ const conversionIds = settlements.map(s => s.id);
 
 if (conversionIds.length > 0) {
 
+  // 1. Insert ONE log entry for this settlement
+  const logRes = await db.query(
+    `INSERT INTO balance_logs (
+      wp_user_id,
+      amount_changed,
+      previous_balance,
+      new_balance,
+      action_type,
+      reason,
+      wallet_type
+    )
+    VALUES ($1, $2, 0, 0, 'settlement', $3, $4)
+    RETURNING id`,
+    [wp_user_id, totalDelta, reason || 'Settlement', walletColumn]
+  );
+
+  const logId = logRes.rows[0].id;
+
+  // 2. Update conversions and LINK them
   await db.query(
     `UPDATE conversions
      SET payout_status = 'paid',
          actual_paid_amount = payout,
-         paid_at = NOW()
+         release_date = NOW(),
+         log_id = $2
      WHERE id = ANY($1::int[])`,
-    [conversionIds]
+    [conversionIds, logId]
   );
-
 }
 
 
