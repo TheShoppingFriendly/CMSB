@@ -78,9 +78,19 @@ export const getUserStats = async (req, res) => {
     const { id } = req.params;
     try {
         const result = await db.query(
-            `SELECT u.current_balance, u.total_earned, u.referral_code,
-             (SELECT COALESCE(SUM(total_earned_from_referee), 0) FROM referrals WHERE referrer_wp_id = u.wp_user_id) as total_ref_earnings
-             FROM users u WHERE u.wp_user_id = $1`,
+            `SELECT 
+                uw.affiliate_balance,
+                uw.affiliate_pending,
+                uw.referral_balance,
+                uw.reward_cash_balance,
+                uw.total_lifetime_earned,
+                u.referral_code,
+                (SELECT COALESCE(SUM(total_earned_from_referee), 0) 
+                 FROM referrals 
+                 WHERE referrer_wp_id = u.wp_user_id) as total_ref_earnings
+             FROM user_wallets uw
+             JOIN users u ON u.wp_user_id = uw.wp_user_id
+             WHERE uw.wp_user_id = $1`,
             [id]
         );
 
@@ -89,16 +99,18 @@ export const getUserStats = async (req, res) => {
         }
 
         const user = result.rows[0];
+
         res.json({
             success: true,
             balances: {
-                available: user.current_balance || 0,
-                pending: 0, 
+                available: user.affiliate_balance || 0,
+                pending: user.affiliate_pending || 0,
                 locked: 0,
                 referral_total: user.total_ref_earnings || 0
             },
-            referral_code: user.referral_code || "" 
+            referral_code: user.referral_code || ""
         });
+
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -137,10 +149,27 @@ export const updateUserBalance = async (req, res) => {
     const walletColumn = category === 'reward' ? 'reward_cash_balance' : 
                          category === 'referral' ? 'referral_balance' : 'affiliate_balance';
 
-    await db.query(
-      `UPDATE user_wallets SET ${walletColumn} = ${walletColumn} + $1, total_lifetime_earned = total_lifetime_earned + $1 WHERE wp_user_id = $2`,
-      [totalDelta, wp_user_id]
-    );
+  if (category === 'direct_affiliate') {
+  // move pending → balance
+  await db.query(
+    `UPDATE user_wallets 
+     SET 
+       affiliate_pending = affiliate_pending - $1,
+       affiliate_balance = affiliate_balance + $1,
+       total_lifetime_earned = total_lifetime_earned + $1
+     WHERE wp_user_id = $2`,
+    [totalDelta, wp_user_id]
+  );
+} else {
+  // reward / referral direct add
+  await db.query(
+    `UPDATE user_wallets 
+     SET ${walletColumn} = ${walletColumn} + $1,
+         total_lifetime_earned = total_lifetime_earned + $1
+     WHERE wp_user_id = $2`,
+    [totalDelta, wp_user_id]
+  );
+}
 
     // 2. Log into GLOBAL_FINANCE_LEDGER (The missing part)
     await db.query(
@@ -157,7 +186,14 @@ export const updateUserBalance = async (req, res) => {
             const referrerId = refRes.rows[0].referrer_wp_id;
             const commission = totalDelta * 0.10;
 
-            await db.query(`UPDATE user_wallets SET referral_balance = referral_balance + $1 WHERE wp_user_id = $2`, [commission, referrerId]);
+    await db.query(
+  `UPDATE user_wallets
+   SET 
+     affiliate_balance = affiliate_balance - $1,
+     affiliate_pending = affiliate_pending + $1
+   WHERE wp_user_id = $2`,
+  [amountToReverse, wp_user_id]
+);
             
             // Log for Referrer in Global Ledger
             await db.query(
@@ -262,14 +298,11 @@ export const revertSettlement = async (req, res) => {
 
             // Subtract from User 1
             const updateRefRes = await db.query(
-                `UPDATE users 
-                 SET current_balance = current_balance - $1, 
-                     total_earned = total_earned - $1 
-                 WHERE wp_user_id = $2
-                 RETURNING current_balance`,
-                [refAmountToTakeBack, referrerId]
-            );
-
+  `UPDATE user_wallets
+   SET referral_balance = referral_balance - $1
+   WHERE wp_user_id = $2`,
+  [refAmountToTakeBack, referrerId]
+);
             const refNewBal = parseFloat(updateRefRes.rows[0].current_balance);
 
             // Log the reversal for User 1 (Prevents NULL in new_balance)
