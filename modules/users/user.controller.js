@@ -17,7 +17,6 @@ const linkReferral = async (refereeWpId, refCode, refereeIp) => {
             [refCode]
         );
         
-
         if (referrerRes.rows.length === 0) return; 
 
         const referrer = referrerRes.rows[0];

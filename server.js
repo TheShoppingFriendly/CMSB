@@ -37,6 +37,7 @@ app.use(
         "https://amgadgets.com",
         "http://localhost:5173",
         "https://cmsfront-seven.vercel.app",
+        "https://app.thegreatbuying.com"
       ];
         
       // CRITICAL FIX: Check if the origin is in the allowed list OR if it is 'null'
