@@ -136,13 +136,28 @@ export const updateUserBalance = async (req, res) => {
     await db.query("BEGIN");
 
     // 1. Snapshot and Update User 
-    const userRes = await db.query(
-        "SELECT affiliate_balance, reward_cash_balance, referral_balance FROM user_wallets WHERE wp_user_id = $1 FOR UPDATE", 
-        [wp_user_id]
-    );
-    if (userRes.rows.length === 0) throw new Error("User wallet not found.");
+ // 1. Lock wallet row + get current balance
+const userRes = await db.query(
+  `SELECT 
+    affiliate_balance, 
+    affiliate_pending,
+    reward_cash_balance, 
+    referral_balance 
+   FROM user_wallets 
+   WHERE wp_user_id = $1 
+   FOR UPDATE`,
+  [wp_user_id]
+);
+
+if (userRes.rows.length === 0) {
+  throw new Error("User wallet not found.");
+}
+
+const wallet = userRes.rows[0];
     
-    const totalDelta = settlements.reduce((sum, item) => sum + parseFloat(item.amount), 0);
+ const previousBalance = parseFloat(wallet.affiliate_balance || 0);
+const totalDelta = settlements.reduce((sum, item) => sum + parseFloat(item.amount), 0);
+const newBalance = previousBalance + totalDelta;
     const category = finance_category || 'direct_affiliate';
 
     // Update the specific wallet column based on category
@@ -222,7 +237,7 @@ if (conversionIds.length > 0) {
     )
     VALUES ($1, $2, 0, 0, 'settlement', $3, $4)
     RETURNING id`,
-    [wp_user_id, totalDelta, reason || 'Settlement', walletColumn]
+    [wp_user_id, totalDelta,   previousBalance, newBalance, reason || 'Settlement', walletColumn]
   );
 
   const logId = logRes.rows[0].id;
