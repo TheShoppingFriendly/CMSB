@@ -195,29 +195,39 @@ const newBalance = previousBalance + totalDelta;
     );
 
     // --- REFERRAL COMMISSION LOGIC ---
-    if (totalDelta > 0 && category === 'direct_affiliate') {
-        const refRes = await db.query("SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1", [wp_user_id]);
-        if (refRes.rows.length > 0) {
-            const referrerId = refRes.rows[0].referrer_wp_id;
-            const commission = totalDelta * 0.10;
+if (totalDelta > 0 && category === 'direct_affiliate') {
+  const refRes = await db.query(
+    "SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1",
+    [wp_user_id]
+  );
 
+  if (refRes.rows.length > 0) {
+    const referrerId = refRes.rows[0].referrer_wp_id;
+    const commission = totalDelta * 0.10;
+
+    // ADD to referrer wallet
     await db.query(
-  `UPDATE user_wallets
-   SET 
-     affiliate_balance = affiliate_balance - $1,
-     affiliate_pending = affiliate_pending + $1
-   WHERE wp_user_id = $2`,
-  [amountToReverse, wp_user_id]
-);
-            
-            // Log for Referrer in Global Ledger
-            await db.query(
-                `INSERT INTO global_finance_ledger (transaction_type, wp_user_id, credit, note, finance_category)
-                 VALUES ($1, $2, $3, $4, $5)`,
-                ['referral_earning', referrerId, commission, `Commission from user ${wp_user_id}`, 'referral']
-            );
-        }
-    }
+      `UPDATE user_wallets 
+       SET referral_balance = referral_balance + $1
+       WHERE wp_user_id = $2`,
+      [commission, referrerId]
+    );
+
+    // LOG
+    await db.query(
+      `INSERT INTO global_finance_ledger 
+       (transaction_type, wp_user_id, credit, note, finance_category)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        'referral_earning',
+        referrerId,
+        commission,
+        `Commission from user ${wp_user_id}`,
+        'referral'
+      ]
+    );
+  }
+}
 
     // 3. Mark conversions as paid
 const conversionIds = settlements.map(s => s.id);
@@ -225,20 +235,28 @@ const conversionIds = settlements.map(s => s.id);
 if (conversionIds.length > 0) {
 
   // 1. Insert ONE log entry for this settlement
-  const logRes = await db.query(
-    `INSERT INTO balance_logs (
-      wp_user_id,
-      amount_changed,
-      previous_balance,
-      new_balance,
-      action_type,
-      reason,
-      wallet_type
-    )
-    VALUES ($1, $2, 0, 0, 'settlement', $3, $4)
-    RETURNING id`,
-    [wp_user_id, totalDelta,   previousBalance, newBalance, reason || 'Settlement', walletColumn]
-  );
+const logRes = await db.query(
+  `INSERT INTO balance_logs (
+    wp_user_id,
+    amount_changed,
+    previous_balance,
+    new_balance,
+    action_type,
+    reason,
+    wallet_type
+  )
+  VALUES ($1, $2, $3, $4, $5, $6, $7)
+  RETURNING id`,
+  [
+    wp_user_id,
+    totalDelta,
+    previousBalance,
+    newBalance,
+    'settlement',
+    reason || 'Settlement',
+    walletColumn
+  ]
+);
 
   const logId = logRes.rows[0].id;
 
