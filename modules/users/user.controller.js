@@ -427,6 +427,7 @@ export const getUserActivity = async (req, res) => {
         new_balance,
         reason,
         status,
+        wallet_type,
         campaign_summary,
         created_at
        FROM balance_logs 
@@ -442,7 +443,8 @@ export const getUserActivity = async (req, res) => {
     affiliate_balance,
     affiliate_pending,
     reward_cash_balance,
-    referral_balance
+    referral_balance,
+    total_lifetime_earned
    FROM user_wallets
    WHERE wp_user_id = $1`,
   [id]
