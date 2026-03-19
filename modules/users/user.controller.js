@@ -245,14 +245,13 @@ const logRes = await db.query(
     reason,
     wallet_type
   )
-  VALUES ($1, $2, $3, $4, $5, $6, $7)
+  VALUES ($1, $2, $3, $4, 'settlement', $5, $6)
   RETURNING id`,
   [
     wp_user_id,
     totalDelta,
-    previousBalance,
-    newBalance,
-    'settlement',
+    previousBalance,   // ✅ REAL previous balance
+    newBalance,        // ✅ REAL new balance
     reason || 'Settlement',
     walletColumn
   ]
