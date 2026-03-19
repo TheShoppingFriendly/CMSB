@@ -186,6 +186,15 @@ const newBalance = previousBalance + totalDelta;
   );
 }
 
+await db.query(
+  `UPDATE users 
+   SET 
+     current_balance = current_balance + $1,
+     total_earned = total_earned + $1
+   WHERE wp_user_id = $2`,
+  [totalDelta, wp_user_id]
+);
+
     // 2. Log into GLOBAL_FINANCE_LEDGER (The missing part)
     await db.query(
       `INSERT INTO global_finance_ledger (
@@ -212,6 +221,22 @@ if (totalDelta > 0 && category === 'direct_affiliate') {
        WHERE wp_user_id = $2`,
       [commission, referrerId]
     );
+
+
+await db.query(
+  `UPDATE user_wallets
+   SET affiliate_balance = affiliate_balance - $1
+   WHERE wp_user_id = $2`,
+  [amountToReverse, wp_user_id]
+);
+
+await db.query(
+  `UPDATE users
+   SET current_balance = current_balance - $1,
+       total_earned = total_earned - CASE WHEN $1 > 0 THEN $1 ELSE 0 END
+   WHERE wp_user_id = $2`,
+  [amountToReverse, wp_user_id]
+);
 
     // LOG
     await db.query(
@@ -335,7 +360,7 @@ export const revertSettlement = async (req, res) => {
    WHERE wp_user_id = $2`,
   [refAmountToTakeBack, referrerId]
 );
-            const refNewBal = parseFloat(updateRefRes.rows[0].current_balance);
+         const refNewBal = refPrevBal - refAmountToTakeBack;
 
             // Log the reversal for User 1 (Prevents NULL in new_balance)
             await db.query(
