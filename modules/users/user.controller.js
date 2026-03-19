@@ -435,10 +435,24 @@ export const getUserActivity = async (req, res) => {
       [id]
     );
 
+
+    // wallet 
+    const wallet = await db.query(
+  `SELECT 
+    affiliate_balance,
+    affiliate_pending,
+    reward_cash_balance,
+    referral_balance
+   FROM user_wallets
+   WHERE wp_user_id = $1`,
+  [id]
+);
+
     res.json({
       clicks: clicks.rows || [],
       conversions: conversions.rows || [],
-      logs: logs.rows || []
+      logs: logs.rows || [],
+        wallet: wallet.rows[0] || {}
     });
 
   } catch (error) {
