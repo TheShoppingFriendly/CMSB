@@ -12,24 +12,40 @@ export const syncStores = async (req, res) => {
   }
 
   const query = `
-    INSERT INTO stores (id, name, slug, status)
-    VALUES ($1, $2, $3, true)
+    INSERT INTO stores 
+    (id, name, slug, status, about, image, store_link, external_store_id, additional_info)
+    VALUES ($1, $2, $3, true, $4, $5, $6, $7, $8)
     ON CONFLICT (id)
     DO UPDATE SET
       name = EXCLUDED.name,
       slug = EXCLUDED.slug,
+      about = EXCLUDED.about,
+      image = EXCLUDED.image,
+      store_link = EXCLUDED.store_link,
+      external_store_id = EXCLUDED.external_store_id,
+      additional_info = EXCLUDED.additional_info,
       synced_at = NOW()
   `;
 
-  for (const store of stores) {
-    await db.query(query, [
-      store.id,
-      store.name,
-      store.slug
-    ]);
-  }
+  try {
+    for (const store of stores) {
+      await db.query(query, [
+        store.id,
+        store.name,
+        store.slug,
+        store.about || null,
+        store.image || null,
+        store.store_link || null,
+        store.external_store_id || null,
+        store.additional_info || null
+      ]);
+    }
 
-  res.json({ success: true });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Sync Error:", err.message);
+    res.status(500).json({ error: "Failed to sync stores" });
+  }
 };
 
 /**
@@ -37,11 +53,19 @@ export const syncStores = async (req, res) => {
  */
 export const getStoresForAdmin = async (req, res) => {
   try {
-    const result = await db.query(`
-      SELECT id, name, slug, status 
-      FROM stores 
-      ORDER BY id DESC
-    `);
+  const result = await db.query(`
+  SELECT 
+    id, 
+    name, 
+    slug, 
+    status,
+    about,
+    image,
+    store_link,
+    external_store_id
+  FROM stores 
+  ORDER BY id DESC
+`);
 
     return res.status(200).json(result.rows);
   } catch (error) {
@@ -59,10 +83,22 @@ export const getStoreCampaignDetails = async (req, res) => {
 
   try {
     /* 1️⃣ Get store */
-    const storeRes = await db.query(
-      `SELECT id, name, slug, status FROM stores WHERE slug = $1`,
-      [slug]
-    );
+   const storeRes = await db.query(
+  `
+  SELECT 
+    id,
+    name,
+    slug,
+    status,
+    about,
+    image,
+    store_link,
+    additional_info
+  FROM stores 
+  WHERE slug = $1
+  `,
+  [slug]
+);
 
     if (storeRes.rowCount === 0) {
       return res.status(404).json({ error: "Store not found" });
