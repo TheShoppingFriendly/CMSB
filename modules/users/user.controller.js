@@ -352,6 +352,36 @@ export const revertSettlement = async (req, res) => {
       [wp_user_id]
     );
 
+    // ✅ CREATE REVERSAL LOG ENTRY
+const prevBalRes = await db.query(
+  `SELECT affiliate_balance FROM user_wallets WHERE wp_user_id = $1`,
+  [wp_user_id]
+);
+
+const newBalAfterRevert = parseFloat(prevBalRes.rows[0].affiliate_balance || 0);
+const previousBalanceBeforeRevert = newBalAfterRevert + amountToReverse;
+
+await db.query(
+  `INSERT INTO balance_logs (
+    wp_user_id,
+    amount_changed,
+    previous_balance,
+    new_balance,
+    action_type,
+    reason,
+    wallet_type,
+    status
+  )
+  VALUES ($1, $2, $3, $4, 'reversal', $5, 'affiliate', 'active')`,
+  [
+    wp_user_id,
+    -amountToReverse,                     // 🔴 NEGATIVE ENTRY
+    previousBalanceBeforeRevert,
+    newBalAfterRevert,
+    'Reversal of previous settlement'
+  ]
+);
+
     await db.query("COMMIT");
 
     res.json({
