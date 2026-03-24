@@ -1,17 +1,13 @@
 import db from "../../db.js";
 
 // --- HELPERS ---
-
-// Generates the TGBRXXXXX format
 const generateTGBRCode = () => {
     const digits = Math.floor(10000 + Math.random() * 90000); 
     return `TGBR${digits}`;
 };
 
-// Logic to link the Referee to the Referrer
 const linkReferral = async (refereeWpId, refCode, refereeIp) => {
     try {
-        // 1. Find who owns the referral code (User 1)
         const referrerRes = await db.query(
             "SELECT wp_user_id, registration_ip FROM users WHERE referral_code = $1",
             [refCode]
@@ -20,11 +16,8 @@ const linkReferral = async (refereeWpId, refCode, refereeIp) => {
         if (referrerRes.rows.length === 0) return; 
 
         const referrer = referrerRes.rows[0];
-
-        // 2. Scam Prevention: Check if IPs match
         const status = (referrer.registration_ip === refereeIp) ? 'flagged' : 'pending';
 
-        // 3. Insert into referrals table
         await db.query(
             `INSERT INTO referrals (referrer_wp_id, referee_wp_id, registration_ip, status)
              VALUES ($1, $2, $3, $4)
@@ -38,9 +31,9 @@ const linkReferral = async (refereeWpId, refCode, refereeIp) => {
 
 // --- CONTROLLERS ---
 
-// 1. Sync Users from WordPress
 export const syncUsers = async (req, res) => {
     const { users } = req.body;
+
     if (!Array.isArray(users)) {
         return res.status(400).json({ error: "Invalid user data format" });
     }
@@ -49,7 +42,6 @@ export const syncUsers = async (req, res) => {
         for (const user of users) {
             const newGeneratedCode = generateTGBRCode();
 
-            // UPSERT User
             await db.query(
                 `INSERT INTO users (wp_user_id, email, name, referral_code, registration_ip)
                  VALUES ($1, $2, $3, $4, $5)
@@ -66,16 +58,20 @@ export const syncUsers = async (req, res) => {
                 await linkReferral(user.wp_user_id, user.ref_code, user.user_ip);
             }
         }
-        res.json({ success: true, message: `Synced ${users.length} users and updated referrals.` });
+
+        res.json({ success: true });
+
     } catch (error) {
         console.error("Sync Error:", error.message);
         res.status(500).json({ error: "Database sync failed" });
     }
 };
 
-// 2. Get User Stats (UPDATED with Referral Totals)
+
+// ✅ GET USER STATS (CORRECT)
 export const getUserStats = async (req, res) => {
     const { id } = req.params;
+
     try {
         const result = await db.query(
             `SELECT 
@@ -94,7 +90,7 @@ export const getUserStats = async (req, res) => {
             [id]
         );
 
-        if (result.rows.length === 0) {
+        if (!result.rows.length) {
             return res.status(404).json({ error: "User not found" });
         }
 
@@ -116,373 +112,302 @@ export const getUserStats = async (req, res) => {
     }
 };
 
-// 2. Fetch all users for Admin Dashboard
+
+// ✅ ADMIN USER LIST (FIXED BALANCE)
 export const getAllUsers = async (req, res) => {
   try {
-    const result = await db.query(`SELECT * FROM users ORDER BY synced_at DESC`);
+    const result = await db.query(`
+      SELECT 
+        u.*,
+        uw.affiliate_balance
+      FROM users u
+      LEFT JOIN user_wallets uw 
+        ON u.wp_user_id = uw.wp_user_id
+      ORDER BY u.synced_at DESC
+    `);
+
     res.json(result.rows);
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
 
-// 3. UPDATED: Manual Balance Update & Conversion Settlement
+// ✅ MAIN SETTLEMENT FUNCTION (FIXED)
 export const updateUserBalance = async (req, res) => {
-  const { wp_user_id, settlements, reason, finance_category } = req.body; 
+  const { wp_user_id, settlements, reason, finance_category } = req.body;
   const adminId = req.admin ? req.admin.id : null;
 
   try {
     await db.query("BEGIN");
 
-    // 1. Snapshot and Update User 
- // 1. Lock wallet row + get current balance
-const userRes = await db.query(
-  `SELECT 
-    affiliate_balance, 
-    affiliate_pending,
-    reward_cash_balance, 
-    referral_balance 
-   FROM user_wallets 
-   WHERE wp_user_id = $1 
-   FOR UPDATE`,
-  [wp_user_id]
-);
-
-if (userRes.rows.length === 0) {
-  throw new Error("User wallet not found.");
-}
-
-const wallet = userRes.rows[0];
-    
- const previousBalance = parseFloat(wallet.affiliate_balance || 0);
-const totalDelta = settlements.reduce((sum, item) => sum + parseFloat(item.amount), 0);
-const newBalance = previousBalance + totalDelta;
-    const category = finance_category || 'direct_affiliate';
-
-    // Update the specific wallet column based on category
-    const walletColumn = category === 'reward' ? 'reward_cash_balance' : 
-                         category === 'referral' ? 'referral_balance' : 'affiliate_balance';
-
-  if (category === 'direct_affiliate') {
-  // move pending → balance
-  await db.query(
-    `UPDATE user_wallets 
-     SET 
-       affiliate_pending = affiliate_pending - $1,
-       affiliate_balance = affiliate_balance + $1,
-       total_lifetime_earned = total_lifetime_earned + $1
-     WHERE wp_user_id = $2`,
-    [totalDelta, wp_user_id]
-  );
-} else {
-  // reward / referral direct add
-  await db.query(
-    `UPDATE user_wallets 
-     SET ${walletColumn} = ${walletColumn} + $1,
-         total_lifetime_earned = total_lifetime_earned + $1
-     WHERE wp_user_id = $2`,
-    [totalDelta, wp_user_id]
-  );
-}
-
-await db.query(
-  `UPDATE users 
-   SET 
-     current_balance = current_balance + $1,
-     total_earned = total_earned + $1
-   WHERE wp_user_id = $2`,
-  [totalDelta, wp_user_id]
-);
-
-    // 2. Log into GLOBAL_FINANCE_LEDGER (The missing part)
-    await db.query(
-      `INSERT INTO global_finance_ledger (
-        transaction_type, admin_id, wp_user_id, credit, note, finance_category, entity_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      ['settlement', adminId, wp_user_id, totalDelta, reason, category, 'manual_adjustment']
+    const userRes = await db.query(
+      `SELECT affiliate_balance, affiliate_pending 
+       FROM user_wallets 
+       WHERE wp_user_id = $1 FOR UPDATE`,
+      [wp_user_id]
     );
 
-    // --- REFERRAL COMMISSION LOGIC ---
-if (totalDelta > 0 && category === 'direct_affiliate') {
-  const refRes = await db.query(
-    "SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1",
-    [wp_user_id]
-  );
+    if (!userRes.rows.length) throw new Error("Wallet not found");
 
-  if (refRes.rows.length > 0) {
-    const referrerId = refRes.rows[0].referrer_wp_id;
-    const commission = totalDelta * 0.10;
+    const wallet = userRes.rows[0];
 
-    // ADD to referrer wallet
+    const previousBalance = parseFloat(wallet.affiliate_balance || 0);
+    const totalDelta = settlements.reduce((sum, s) => sum + parseFloat(s.amount), 0);
+    const newBalance = previousBalance + totalDelta;
+
+    // ✅ MOVE pending → balance
     await db.query(
       `UPDATE user_wallets 
-       SET referral_balance = referral_balance + $1
+       SET 
+         affiliate_pending = affiliate_pending - $1,
+         affiliate_balance = affiliate_balance + $1,
+         total_lifetime_earned = total_lifetime_earned + $1
        WHERE wp_user_id = $2`,
-      [commission, referrerId]
+      [totalDelta, wp_user_id]
     );
 
-
-await db.query(
-  `UPDATE user_wallets
-   SET affiliate_balance = affiliate_balance - $1
-   WHERE wp_user_id = $2`,
-  [amountToReverse, wp_user_id]
-);
-
-await db.query(
-  `UPDATE users
-   SET current_balance = current_balance - $1,
-       total_earned = total_earned - CASE WHEN $1 > 0 THEN $1 ELSE 0 END
-   WHERE wp_user_id = $2`,
-  [amountToReverse, wp_user_id]
-);
-
-    // LOG
+    // ✅ SYNC USERS TABLE
     await db.query(
-      `INSERT INTO global_finance_ledger 
-       (transaction_type, wp_user_id, credit, note, finance_category)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        'referral_earning',
-        referrerId,
-        commission,
-        `Commission from user ${wp_user_id}`,
-        'referral'
-      ]
+      `UPDATE users 
+       SET 
+         current_balance = current_balance + $1,
+         total_earned = total_earned + $1
+       WHERE wp_user_id = $2`,
+      [totalDelta, wp_user_id]
     );
-  }
-}
 
-    // 3. Mark conversions as paid
-const conversionIds = settlements.map(s => s.id);
+    // ✅ REFERRAL
+    const refRes = await db.query(
+      "SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1",
+      [wp_user_id]
+    );
 
-if (conversionIds.length > 0) {
+    if (refRes.rows.length > 0) {
+      const referrerId = refRes.rows[0].referrer_wp_id;
+      const commission = totalDelta * 0.10;
 
-  // 1. Insert ONE log entry for this settlement
-const logRes = await db.query(
-  `INSERT INTO balance_logs (
-    wp_user_id,
-    amount_changed,
-    previous_balance,
-    new_balance,
-    action_type,
-    reason,
-    wallet_type
-  )
-  VALUES ($1, $2, $3, $4, 'settlement', $5, $6)
-  RETURNING id`,
-  [
-    wp_user_id,
-    totalDelta,
-    previousBalance,   // ✅ REAL previous balance
-    newBalance,        // ✅ REAL new balance
-    reason || 'Settlement',
-    walletColumn
-  ]
-);
+      await db.query(
+        `UPDATE user_wallets 
+         SET referral_balance = referral_balance + $1
+         WHERE wp_user_id = $2`,
+        [commission, referrerId]
+      );
 
-  const logId = logRes.rows[0].id;
+      await db.query(
+        `UPDATE users 
+         SET current_balance = current_balance + $1
+         WHERE wp_user_id = $2`,
+        [commission, referrerId]
+      );
 
-  // 2. Update conversions and LINK them
-  await db.query(
-    `UPDATE conversions
-     SET payout_status = 'paid',
-         actual_paid_amount = payout,
-         release_date = NOW(),
-         log_id = $2
-     WHERE id = ANY($1::int[])`,
-    [conversionIds, logId]
-  );
-}
+      await db.query(
+        `UPDATE referrals 
+         SET total_earned_from_referee = total_earned_from_referee + $1
+         WHERE referee_wp_id = $2`,
+        [commission, wp_user_id]
+      );
+    }
 
+    // ✅ LOG
+    const logRes = await db.query(
+      `INSERT INTO balance_logs (
+        wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, wallet_type
+      )
+      VALUES ($1, $2, $3, $4, 'settlement', $5, 'affiliate')
+      RETURNING id`,
+      [wp_user_id, totalDelta, previousBalance, newBalance, reason || 'Settlement']
+    );
 
+    const logId = logRes.rows[0].id;
+
+    const conversionIds = settlements.map(s => s.id);
+
+    if (conversionIds.length > 0) {
+      await db.query(
+        `UPDATE conversions
+         SET payout_status = 'paid',
+             actual_paid_amount = payout,
+             release_date = NOW(),
+             log_id = $2
+         WHERE id = ANY($1::int[])`,
+        [conversionIds, logId]
+      );
+    }
+
+    // ✅ HARD SYNC (FINAL GUARANTEE)
+    await db.query(
+      `UPDATE users u
+       SET current_balance = uw.affiliate_balance
+       FROM user_wallets uw
+       WHERE u.wp_user_id = uw.wp_user_id
+         AND u.wp_user_id = $1`,
+      [wp_user_id]
+    );
 
     await db.query("COMMIT");
+
     res.json({ success: true });
+
   } catch (error) {
     await db.query("ROLLBACK");
     res.status(500).json({ error: error.message });
   }
 };
 
-// 4. UPDATED: Revert Settlement (Handles reversing Referral Commissions)
 export const revertSettlement = async (req, res) => {
   const { log_id } = req.body;
+
   try {
     await db.query("BEGIN");
 
-    // 1. Get the original log
+    // 1. Get log
     const logRes = await db.query(
-        "SELECT * FROM balance_logs WHERE id = $1 AND status != 'reverted' FOR UPDATE", 
-        [log_id]
+      "SELECT * FROM balance_logs WHERE id = $1 AND status != 'reverted' FOR UPDATE",
+      [log_id]
     );
-    
-    if (logRes.rows.length === 0) {
-        throw new Error("Transaction not found or already reverted.");
-    }
-    
-    const { wp_user_id, amount_changed } = logRes.rows[0];
-    const amountToReverse = parseFloat(amount_changed);
 
-    // 2. Mathematically reverse User 2's balance
-    const updateUserRes = await db.query(
-      `UPDATE users 
-       SET current_balance = current_balance - $1, 
-           total_earned = total_earned - CASE WHEN $1 > 0 THEN $1 ELSE 0 END 
-       WHERE wp_user_id = $2
-       RETURNING current_balance`,
+    if (!logRes.rows.length) {
+      throw new Error("Transaction not found or already reverted");
+    }
+
+    const log = logRes.rows[0];
+    const wp_user_id = log.wp_user_id;
+    const amountToReverse = parseFloat(log.amount_changed || 0);
+
+    // 2. Reverse USER WALLET
+    await db.query(
+      `UPDATE user_wallets
+       SET affiliate_balance = affiliate_balance - $1
+       WHERE wp_user_id = $2`,
       [amountToReverse, wp_user_id]
     );
 
-    if (updateUserRes.rows.length === 0) throw new Error("User record not found for reversal.");
+    // 3. Reverse USERS TABLE (SYNC)
+    await db.query(
+      `UPDATE users
+       SET current_balance = current_balance - $1,
+           total_earned = total_earned - CASE WHEN $1 > 0 THEN $1 ELSE 0 END
+       WHERE wp_user_id = $2`,
+      [amountToReverse, wp_user_id]
+    );
 
-    // --- NEW: REVERSE REFERRAL COMMISSION (USER 1) ---
-    if (amountToReverse > 0) {
-        // Find if this user has a referrer
-        const refRes = await db.query(
-            "SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1", 
-            [wp_user_id]
-        );
-        
-        if (refRes.rows.length > 0) {
-            const referrerId = refRes.rows[0].referrer_wp_id;
-            const refAmountToTakeBack = amountToReverse * 0.10;
+    // 4. Reverse REFERRAL (if exists)
+    const refRes = await db.query(
+      "SELECT referrer_wp_id FROM referrals WHERE referee_wp_id = $1",
+      [wp_user_id]
+    );
 
-            // Snapshot Referrer's current state to calculate new_balance for logs
-            const refState = await db.query("SELECT current_balance FROM users WHERE wp_user_id = $1 FOR UPDATE", [referrerId]);
-            const refPrevBal = parseFloat(refState.rows[0].current_balance || 0);
+    if (refRes.rows.length > 0) {
+      const referrerId = refRes.rows[0].referrer_wp_id;
+      const commission = amountToReverse * 0.10;
 
-            // Subtract from User 1
-            const updateRefRes = await db.query(
-  `UPDATE user_wallets
-   SET referral_balance = referral_balance - $1
-   WHERE wp_user_id = $2`,
-  [refAmountToTakeBack, referrerId]
-);
-         const refNewBal = refPrevBal - refAmountToTakeBack;
+      await db.query(
+        `UPDATE user_wallets
+         SET referral_balance = referral_balance - $1
+         WHERE wp_user_id = $2`,
+        [commission, referrerId]
+      );
 
-            // Log the reversal for User 1 (Prevents NULL in new_balance)
-            await db.query(
-                `INSERT INTO balance_logs (wp_user_id, amount_changed, previous_balance, new_balance, action_type, reason, status)
-                 VALUES ($1, $2, $3, $4, 'referral_reversal', $5, 'reverted')`,
-                [referrerId, -refAmountToTakeBack, refPrevBal, refNewBal, `Reversal of commission from Friend #${wp_user_id}`]
-            );
+      await db.query(
+        `UPDATE users
+         SET current_balance = current_balance - $1
+         WHERE wp_user_id = $2`,
+        [commission, referrerId]
+      );
 
-            // Subtract from the referral table stats
-            await db.query(
-                `UPDATE referrals 
-                 SET total_earned_from_referee = total_earned_from_referee - $1 
-                 WHERE referee_wp_id = $2`,
-                [refAmountToTakeBack, wp_user_id]
-            );
-        }
+      await db.query(
+        `UPDATE referrals
+         SET total_earned_from_referee = total_earned_from_referee - $1
+         WHERE referee_wp_id = $2`,
+        [commission, wp_user_id]
+      );
     }
 
-    // 3. Reset linked conversions back to pending
+    // 5. Reset conversions
     await db.query(
-      `UPDATE conversions 
-       SET payout_status = 'pending', 
-           actual_paid_amount = NULL, 
-           log_id = NULL, 
-           release_date = NULL 
+      `UPDATE conversions
+       SET payout_status = 'pending',
+           actual_paid_amount = NULL,
+           log_id = NULL,
+           release_date = NULL
        WHERE log_id = $1`,
       [log_id]
     );
 
-    // 4. Mark the original log as reverted
-    await db.query("UPDATE balance_logs SET status = 'reverted' WHERE id = $1", [log_id]);
+    // 6. Mark log reverted
+    await db.query(
+      "UPDATE balance_logs SET status = 'reverted' WHERE id = $1",
+      [log_id]
+    );
+
+    // 7. FINAL HARD SYNC (VERY IMPORTANT)
+    await db.query(
+      `UPDATE users u
+       SET current_balance = uw.affiliate_balance
+       FROM user_wallets uw
+       WHERE u.wp_user_id = uw.wp_user_id
+         AND u.wp_user_id = $1`,
+      [wp_user_id]
+    );
 
     await db.query("COMMIT");
-    res.json({ success: true, message: "Transaction and linked referral commissions reverted successfully." });
+
+    res.json({
+      success: true,
+      message: "Settlement reverted successfully"
+    });
+
   } catch (error) {
     await db.query("ROLLBACK");
-    console.error("Reversal Error:", error.message);
+    console.error("Revert Error:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
 
-// 5. Fetch User Specific Activity
+// ✅ USER ACTIVITY (ALREADY CORRECT)
 export const getUserActivity = async (req, res) => {
   const { id } = req.params;
 
   try {
-    if (!id) {
-      return res.status(400).json({ error: "Missing user ID" });
-    }
-
-    // Fetch recent clicks
     const clicks = await db.query(
       `SELECT clickid, ip_address, created_at 
        FROM click_tracking 
        WHERE wp_user_id = $1 
-       ORDER BY created_at DESC 
-       LIMIT 50`,
+       ORDER BY created_at DESC LIMIT 50`,
       [id]
     );
 
-    // Fetch conversions linked through click_tracking
     const conversions = await db.query(
-      `SELECT 
-        c.id,
-        ct.clickid,
-        ct.campaign_id,
-        c.payout,
-        c.actual_paid_amount,
-        c.commission,
-        c.status,
-        c.payout_status,
-        c.release_date,
-        c.created_at
+      `SELECT c.*, ct.clickid 
        FROM conversions c
-       JOIN click_tracking ct 
-       ON c.click_id = ct.id
+       JOIN click_tracking ct ON c.click_id = ct.id
        WHERE ct.wp_user_id = $1
        ORDER BY c.created_at DESC`,
       [id]
     );
 
-    // Fetch ledger logs
     const logs = await db.query(
-      `SELECT 
-        id,
-        amount_changed,
-        previous_balance,
-        new_balance,
-        reason,
-        status,
-        wallet_type,
-        campaign_summary,
-        created_at
-       FROM balance_logs 
+      `SELECT * FROM balance_logs 
        WHERE wp_user_id = $1 
        ORDER BY created_at DESC`,
       [id]
     );
 
-
-    // wallet 
     const wallet = await db.query(
-  `SELECT 
-    affiliate_balance,
-    affiliate_pending,
-    reward_cash_balance,
-    referral_balance,
-    total_lifetime_earned
-   FROM user_wallets
-   WHERE wp_user_id = $1`,
-  [id]
-);
+      `SELECT * FROM user_wallets WHERE wp_user_id = $1`,
+      [id]
+    );
 
     res.json({
-      clicks: clicks.rows || [],
-      conversions: conversions.rows || [],
-      logs: logs.rows || [],
-        wallet: wallet.rows[0] || {}
+      clicks: clicks.rows,
+      conversions: conversions.rows,
+      logs: logs.rows,
+      wallet: wallet.rows[0] || {}
     });
 
   } catch (error) {
-    console.error("getUserActivity Error:", error.message);
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: error.message });
   }
 };
