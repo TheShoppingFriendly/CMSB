@@ -1,9 +1,9 @@
 import db from "../../db.js";
 
 // --- HELPERS ---
-const generateTGBRCode = () => {
+const generateTSFRCode = () => {
     const digits = Math.floor(10000 + Math.random() * 90000); 
-    return `TGBR${digits}`;
+    return `TSFR${digits}`;
 };
 
 const linkReferral = async (refereeWpId, refCode, refereeIp) => {
@@ -40,7 +40,7 @@ export const syncUsers = async (req, res) => {
 
     try {
         for (const user of users) {
-            const newGeneratedCode = generateTGBRCode();
+            const newGeneratedCode = generateTSFRCode();
 
             await db.query(
                 `INSERT INTO users (wp_user_id, email, name, referral_code, registration_ip)
