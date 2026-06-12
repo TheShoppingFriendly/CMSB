@@ -32,40 +32,73 @@ const linkReferral = async (refereeWpId, refCode, refereeIp) => {
 // --- CONTROLLERS ---
 
 export const syncUsers = async (req, res) => {
-    const { users } = req.body;
+const { users } = req.body;
 
-    if (!Array.isArray(users)) {
-        return res.status(400).json({ error: "Invalid user data format" });
-    }
+if (!Array.isArray(users)) {
+    return res.status(400).json({
+        error: "Invalid user data format"
+    });
+}
 
-    try {
-        for (const user of users) {
-            const newGeneratedCode = generateTSFRCode();
+try {
 
-            await db.query(
-                `INSERT INTO users (wp_user_id, email, name, referral_code, registration_ip)
-                 VALUES ($1, $2, $3, $4, $5)
-                 ON CONFLICT (wp_user_id) 
-                 DO UPDATE SET 
-                    email = EXCLUDED.email, 
-                    name = EXCLUDED.name,
-                    registration_ip = COALESCE(users.registration_ip, EXCLUDED.registration_ip),
-                    referral_code = COALESCE(users.referral_code, EXCLUDED.referral_code)`,
-                [user.wp_user_id, user.email, user.name, newGeneratedCode, user.user_ip]
+    for (const user of users) {
+
+        const newGeneratedCode = generateTSFRCode();
+
+        await db.query(
+            `
+            INSERT INTO users (
+                wp_user_id,
+                email,
+                name,
+                referral_code,
+                registration_ip
+            )
+            VALUES ($1, $2, $3, $4, $5)
+
+            ON CONFLICT (wp_user_id)
+            DO UPDATE SET
+                email = EXCLUDED.email,
+                name = EXCLUDED.name,
+                registration_ip = EXCLUDED.registration_ip
+            `,
+            [
+                parseInt(user.wp_user_id),
+                user.email || '',
+                user.name || '',
+                newGeneratedCode,
+                user.user_ip || null
+            ]
+        );
+
+        if (
+            user.ref_code &&
+            user.ref_code.trim() !== ''
+        ) {
+            await linkReferral(
+                user.wp_user_id,
+                user.ref_code,
+                user.user_ip || null
             );
-
-            if (user.ref_code) {
-                await linkReferral(user.wp_user_id, user.ref_code, user.user_ip);
-            }
         }
-
-        res.json({ success: true });
-
-    } catch (error) {
-        console.error("Sync Error:", error.message);
-        res.status(500).json({ error: "Database sync failed" });
     }
+
+    return res.json({
+        success: true
+    });
+
+} catch (error) {
+
+    console.error('SYNC ERROR:', error);
+
+    return res.status(500).json({
+        error: error.message
+    });
+}
+
 };
+
 
 
 // ✅ GET USER STATS (CORRECT)
