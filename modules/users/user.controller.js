@@ -72,6 +72,22 @@ try {
             ]
         );
 
+        await db.query(
+`
+INSERT INTO user_wallets (
+    wp_user_id,
+    affiliate_balance,
+    affiliate_pending,
+    referral_balance,
+    reward_cash_balance,
+    total_lifetime_earned
+)
+VALUES ($1,0,0,0,0,0)
+ON CONFLICT (wp_user_id) DO NOTHING
+`,
+[parseInt(user.wp_user_id)]
+);
+
         if (
             user.ref_code &&
             user.ref_code.trim() !== ''
@@ -129,16 +145,26 @@ export const getUserStats = async (req, res) => {
 
         const user = result.rows[0];
 
-        res.json({
-            success: true,
-            balances: {
-                available: user.affiliate_balance || 0,
-                pending: user.affiliate_pending || 0,
-                locked: 0,
-                referral_total: user.total_ref_earnings || 0
-            },
-            referral_code: user.referral_code || ""
-        });
+      res.json({
+    success: true,
+
+    balances: {
+        available: user.affiliate_balance || 0,
+        pending: user.affiliate_pending || 0,
+        locked: 0,
+        referral_total: user.total_ref_earnings || 0
+    },
+
+    wallet: {
+        affiliate_balance: user.affiliate_balance || 0,
+        affiliate_pending: user.affiliate_pending || 0,
+        referral_balance: user.referral_balance || 0,
+        reward_cash_balance: user.reward_cash_balance || 0,
+        total_lifetime_earned: user.total_lifetime_earned || 0
+    },
+
+    referral_code: user.referral_code || ""
+});
 
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -170,6 +196,12 @@ export const getAllUsers = async (req, res) => {
 // ✅ MAIN SETTLEMENT FUNCTION (FIXED)
 export const updateUserBalance = async (req, res) => {
   const { wp_user_id, settlements, reason, finance_category } = req.body;
+
+  if (!Array.isArray(settlements) || settlements.length === 0) {
+  return res.status(400).json({
+    error: "No settlements selected"
+  });
+}
   const adminId = req.admin ? req.admin.id : null;
 
   try {
@@ -182,7 +214,36 @@ export const updateUserBalance = async (req, res) => {
       [wp_user_id]
     );
 
-    if (!userRes.rows.length) throw new Error("Wallet not found");
+if (!userRes.rows.length) {
+
+    await db.query(
+    `
+    INSERT INTO user_wallets (
+        wp_user_id,
+        affiliate_balance,
+        affiliate_pending,
+        referral_balance,
+        reward_cash_balance,
+        total_lifetime_earned
+    )
+    VALUES ($1,0,0,0,0,0)
+       ON CONFLICT (wp_user_id) DO NOTHING
+    `,
+    [wp_user_id]
+    );
+
+    const retry = await db.query(
+    `
+    SELECT affiliate_balance, affiliate_pending
+    FROM user_wallets
+    WHERE wp_user_id = $1
+    FOR UPDATE
+    `,
+    [wp_user_id]
+    );
+
+    userRes.rows = retry.rows;
+}
 
     const wallet = userRes.rows[0];
 
@@ -255,7 +316,9 @@ export const updateUserBalance = async (req, res) => {
 
     const logId = logRes.rows[0].id;
 
-    const conversionIds = settlements.map(s => s.id);
+const conversionIds = settlements
+    .filter(s => s && s.id)
+    .map(s => parseInt(s.id));
 
     if (conversionIds.length > 0) {
       await db.query(
